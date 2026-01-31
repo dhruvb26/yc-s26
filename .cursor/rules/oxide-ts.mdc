@@ -1,0 +1,713 @@
+# oxide.ts - Rust-like Option and Result Types for TypeScript
+
+**Comprehensive guide for using oxide.ts - Rust's `Option<T>` and `Result<T, E>` in TypeScript**
+
+## Core Imports
+
+```ts
+// Full library (includes match)
+import { Option, Some, None, Result, Ok, Err, match, Fn, _ } from "oxide.ts";
+
+// Core only (excludes match)
+import { Option, Some, None, Result, Ok, Err } from "oxide.ts/core";
+```
+
+## Option<T> - Handling Nullable Values
+
+Use `Option<T>` for values that may or may not exist. It's either `Some<T>` or `None`.
+
+### Basic Usage
+
+```ts
+import { Option, Some, None } from "oxide.ts";
+
+function divide(x: number, by: number): Option<number> {
+  return by === 0 ? None : Some(x / by);
+}
+
+const result = divide(100, 20);
+
+// Extract value
+result.unwrap(); // 5 (throws if None)
+result.expect("Must exist"); // 5 (throws with message if None)
+result.unwrapOr(0); // 5 (or 0 if None)
+result.unwrapOrElse(() => 0); // 5 (or computed default)
+
+// Transform
+result.map((n) => n * 2); // Option<number>
+result.mapOr(0, (n) => n * 2); // number
+result.mapOrElse(
+  () => 0,
+  (n) => n * 2
+); // number
+
+// Chain operations
+result
+  .map((n) => n * 2)
+  .filter((n) => n > 5)
+  .unwrapOr(0);
+
+// Check state
+result.isSome(); // true
+result.isNone(); // false
+```
+
+### Creating Options
+
+```ts
+// Direct creation
+const some = Some(42);
+const none = None;
+
+// From nullable values (filters out falsey, Error, invalid Date)
+const opt1 = Option("hello"); // Some("hello")
+const opt2 = Option(null); // None
+const opt3 = Option(false); // None
+const opt4 = Option(0); // None (0 is falsey)
+
+// From arrays
+const people = ["Fry", "Leela", "Bender"];
+const person = Option(people.find((name) => name === "Fry")); // Some("Fry")
+
+// nonNull - only filters null, undefined, NaN (keeps other falsey)
+const num = Option.nonNull(0); // Some(0)
+const undef = Option.nonNull(null); // None
+
+// qty - for finite integers >= 0
+const index = Option.qty("hello".indexOf("e")); // Some(1)
+const missing = Option.qty("hello".indexOf("z")); // None (-1 is invalid)
+```
+
+## Result<T, E> - Rich Error Handling
+
+Use `Result<T, E>` for operations that can succeed with `Ok<T>` or fail with `Err<E>`.
+
+### Basic Usage
+
+```ts
+import { Result, Ok, Err } from "oxide.ts";
+
+function divide(x: number, by: number): Result<number, string> {
+  return by === 0 ? Err("Division by zero") : Ok(x / by);
+}
+
+const result = divide(100, 20);
+
+// Extract value
+result.unwrap(); // 5 (throws if Err)
+result.expect("Must succeed"); // 5 (throws with message if Err)
+result.unwrapOr(0); // 5 (or 0 if Err)
+
+// Extract error
+result.unwrapErr(); // Throws if Ok
+result.expectErr("Must fail"); // Throws with message if Ok
+
+// Transform value
+result.map((n) => n * 2); // Result<number, string>
+result.mapOr(0, (n) => n * 2); // number
+
+// Transform error
+result.mapErr((msg) => new Error(msg)); // Result<number, Error>
+
+// Check state
+result.isOk(); // true
+result.isErr(); // false
+```
+
+### Creating Results
+
+```ts
+// Direct creation
+const ok = Ok(42);
+const err = Err("failed");
+
+// From nullable/errors (E type includes null and any Error types)
+const res1 = Result("hello"); // Ok("hello")
+const res2 = Result(null); // Err(null)
+const res3 = Result(new Error("fail")); // Err(Error)
+const res4 = Result(false); // Err(null)
+
+function tryName(): string | Error {
+  /* ... */
+}
+const name = Result(tryName()); // Result<string, Error | null>
+
+// nonNull - only filters null, undefined, NaN
+const num = Result.nonNull(0); // Ok(0)
+
+// qty - for finite integers >= 0
+const idx = Result.qty(5); // Ok(5)
+const invalid = Result.qty(-1); // Err(null)
+```
+
+## Converting to/from Regular Types
+
+### into() - Convert to Union Types
+
+```ts
+function maybeName(): Option<string> {
+  /* ... */
+}
+function maybeNumbers(): Result<number[], Error> {
+  /* ... */
+}
+
+// Convert to T | undefined
+const name: string | undefined = maybeName().into();
+
+// Convert to T | custom falsey value
+const name: string | null = maybeName().into(null);
+const numbers: number[] | false = maybeNumbers().into(false);
+
+// Use in function arguments
+function printOut(msg?: string): void {
+  /* ... */
+}
+printOut(maybeName().into());
+```
+
+### intoTuple() - Convert Result to Tuple (Go-style)
+
+```ts
+function getUsername(): Result<string, Error> {
+  /* ... */
+}
+
+const [err, res] = getUsername().intoTuple();
+
+if (err) {
+  console.error(`Error: ${err}`);
+} else {
+  console.log(`Welcome: ${res.toLowerCase()}`);
+}
+```
+
+## Safe Execution - Catching Errors/Rejections
+
+### Safe Functions
+
+Wraps function calls to prevent throwing:
+
+```ts
+function mightThrow(throws: boolean): string {
+  if (throws) throw new Error("Throw");
+  return "Hello World";
+}
+
+// Returns Result<string, Error>
+const x = Result.safe(mightThrow, true);
+x.unwrapErr(); // Error("Throw")
+
+const y = Result.safe(() => mightThrow(false));
+y.unwrap(); // "Hello World"
+
+// Option version (no error details)
+const z = Option.safe(mightThrow, false);
+z.unwrap(); // "Hello World"
+```
+
+### Safe Promises
+
+Wraps promises to prevent rejection:
+
+```ts
+async function mightThrow(throws: boolean): Promise<string> {
+  if (throws) throw new Error("Throw");
+  return "Hello World";
+}
+
+// Returns Promise<Result<string, Error>>
+const x = await Result.safe(mightThrow(true));
+x.isErr(); // true
+x.unwrapErr(); // Error("Throw")
+
+const y = await Result.safe(mightThrow(false));
+y.unwrap(); // "Hello World"
+
+// Option version
+const z = await Option.safe(mightThrow(false));
+z.isSome(); // true
+```
+
+## Combining Multiple Options/Results
+
+### all() - All Must Succeed
+
+First `None`/`Err` encountered is returned, otherwise returns array of all values:
+
+```ts
+function num(val: number): Result<number, string> {
+  return val > 10 ? Ok(val) : Err(`Value ${val} too low`);
+}
+
+const xyz = Result.all(num(20), num(30), num(40));
+const [x, y, z] = xyz.unwrap(); // [20, 30, 40]
+
+const failed = Result.all(num(20), num(5), num(40));
+failed.unwrapErr(); // "Value 5 too low"
+
+// Works with Option too
+const opts = Option.all(Some(1), Some(2), Some(3));
+opts.unwrap(); // [1, 2, 3]
+```
+
+### any() - First Success Wins
+
+Returns first `Some`/`Ok` found, otherwise `None` or `Err` with all errors:
+
+```ts
+function num(val: number): Result<number, string> {
+  return val > 10 ? Ok(val) : Err(`Value ${val} too low`);
+}
+
+const x = Result.any(num(5), num(20), num(2));
+x.unwrap(); // 20
+
+const failed = Result.any(num(2), num(5), num(8));
+const [e, f, g] = failed.unwrapErr();
+// ["Value 2 too low", "Value 5 too low", "Value 8 too low"]
+```
+
+## Nesting - Distinguishing Multiple Failure Modes
+
+```ts
+// Distinguish: found, not found, database error
+function search(query: string): Result<Option<SearchResult>, string> {
+  const [err, result] = database.search(query);
+  if (err) {
+    return Err(err);
+  }
+  return Ok(result.count > 0 ? Some(result) : None);
+}
+
+const result = search("testing");
+
+// Handle all cases with match (see below)
+const output = match(result, {
+  Ok: {
+    Some: (result) => `Found ${result.count} entries`,
+    None: () => "No results found",
+  },
+  Err: (err) => `Error: ${err}`,
+});
+```
+
+## Pattern Matching
+
+### Mapped Matching - Option/Result
+
+```ts
+const num = Option(10);
+const res = match(num, {
+  Some: (n) => n + 1,
+  None: () => 0,
+});
+// res === 11
+
+// With Result
+const result = divide(100, 20);
+const message = match(result, {
+  Ok: (val) => `Success: ${val}`,
+  Err: (err) => `Error: ${err}`,
+});
+
+// Nested matching with default (_)
+function nested(val: Result<Option<number>, string>): string {
+  return match(val, {
+    Ok: { Some: (num) => `found ${num}` },
+    _: () => "nothing",
+  });
+}
+
+nested(Ok(Some(10))); // "found 10"
+nested(Ok(None)); // "nothing"
+nested(Err("Not a number")); // "nothing"
+```
+
+### Combined Matching
+
+Combine mapped and chained matching:
+
+```ts
+function matchNum(val: Option<number>): string {
+  return match(val, {
+    Some: [
+      [5, "exactly 5"],
+      [(x) => x < 10, "less than 10"],
+      [(x) => x > 20, "greater than 20"],
+    ],
+    _: () => "none or not matched",
+  });
+}
+
+matchNum(Some(5)); // "exactly 5"
+matchNum(Some(7)); // "less than 10"
+matchNum(Some(25)); // "greater than 20"
+matchNum(Some(15)); // "none or not matched"
+matchNum(None); // "none or not matched"
+```
+
+### Chained Matching - Any Type
+
+```ts
+import { match, _ } from "oxide.ts";
+
+// Array matching
+function matchArr(arr: number[]): string {
+  return match(arr, [
+    [[1], "just one"],
+    [[2, (x) => x > 10], "2 followed by >10"],
+    [[_, 6, 9, _], (a) => a.join(", ")],
+    () => "other",
+  ]);
+}
+
+// Object matching
+interface ExampleObj {
+  a: number;
+  b?: { c: number };
+  o?: number;
+}
+
+function matchObj(obj: ExampleObj): string {
+  return match(obj, [
+    [{ a: 5 }, "a = 5"],
+    [{ b: { c: 5 } }, "c = 5"],
+    [{ a: 10, o: _ }, "a = 10, o exists"],
+    [{ a: 15, b: { c: (n) => n > 10 } }, "a = 15; c > 10"],
+    () => "other",
+  ]);
+}
+```
+
+### Compiled Matching
+
+Pre-compile match patterns into reusable functions:
+
+```ts
+const matchSome = match.compile({
+  Some: (n: number) => `some ${n}`,
+  None: () => "none",
+});
+
+matchSome(Some(1)); // "some 1"
+matchSome(None); // "none"
+```
+
+## Iteration
+
+Iterate over Option/Result containing iterables:
+
+```ts
+const numbers = Option([1.12, 2.23, 3.34]);
+for (const num of numbers) {
+  console.log(num.toFixed(1));
+}
+
+// Empty iteration for None/Err
+const empty: Option<number[]> = None;
+for (const num of empty) {
+  console.log("Never executed");
+}
+
+// Works with nested monads
+const nested = Option(Result(Option([1, 2, 3])));
+for (const num of nested) {
+  console.log(num); // 1, 2, 3
+}
+```
+
+## Advanced Methods
+
+### flatMap (andThen)
+
+Chain operations that return Option/Result:
+
+```ts
+function divide(x: number, by: number): Option<number> {
+  return by === 0 ? None : Some(x / by);
+}
+
+Some(10)
+  .andThen((n) => divide(n, 2)) // Some(5)
+  .andThen((n) => divide(n, 0)) // None
+  .unwrapOr(0); // 0
+```
+
+### flatten
+
+Unwrap nested Option/Result:
+
+```ts
+const nested: Option<Option<number>> = Some(Some(42));
+nested.flatten(); // Option<number> = Some(42)
+
+const double: Result<Result<string, Error>, Error> = Ok(Ok("hello"));
+double.flatten(); // Result<string, Error> = Ok("hello")
+```
+
+### filter (Option only)
+
+Keep Some values that match predicate:
+
+```ts
+Some(10)
+  .filter((n) => n > 5) // Some(10)
+  .filter((n) => n > 20) // None
+  .unwrapOr(0); // 0
+```
+
+### or/and Operations
+
+```ts
+// or - returns first Some/Ok, or second if first is None/Err
+Some(1).or(Some(2)); // Some(1)
+None.or(Some(2)); // Some(2)
+
+// and - returns second if first is Some/Ok, otherwise first
+Some(1).and(Some(2)); // Some(2)
+None.and(Some(2)); // None
+
+// orElse/andThen - lazy versions with functions
+Some(1).orElse(() => Some(2));
+Some(1).andThen((n) => Some(n * 2));
+```
+
+## Helper Utilities
+
+Custom utilities to simplify Result handling with better error management:
+
+### unwrapOrThrow
+
+Unwraps a Result or throws with enhanced error handling and optional logging:
+
+```ts
+import { unwrapOrThrow } from "@repo/utils/result";
+import { logger } from "@trigger.dev/sdk";
+import { Result, Ok, Err } from "oxide.ts";
+
+// Simple usage - throws the error directly
+const value = unwrapOrThrow(someResult);
+
+// With custom error message
+const value = unwrapOrThrow(someResult, {
+  message: "Failed to fetch user data"
+});
+
+// With logger integration (ideal for Trigger.dev tasks)
+const value = unwrapOrThrow(someResult, {
+  logger,
+  message: "Failed to create database connection"
+});
+
+// With additional context for debugging
+const value = unwrapOrThrow(userResult, {
+  logger,
+  message: "Failed to process user",
+  context: { userId: "123", operation: "update" }
+});
+```
+
+**When to use:**
+- You need to propagate errors but want better error messages
+- Working in Trigger.dev tasks and want automatic logging
+- You want to add context to errors before they bubble up
+
+### unwrapOrDefault
+
+Unwraps a Result or returns a default value, with optional error logging:
+
+```ts
+import { unwrapOrDefault } from "@repo/utils/result";
+
+// Simple fallback
+const config = unwrapOrDefault(getConfig(), {
+  url: "postgresql://localhost:5432/default"
+});
+
+// With logging to track failures
+const config = unwrapOrDefault(
+  getConfig(),
+  { url: "postgresql://localhost:5432/default" },
+  {
+    logger,
+    message: "Config load failed, using defaults"
+  }
+);
+```
+
+**When to use:**
+- You have a sensible default value to fall back to
+- Failures are non-critical but worth logging
+- You want graceful degradation instead of throwing
+
+## Best Practices
+
+### ✅ Do
+
+- **Use Option for nullable values** instead of `T | null | undefined`
+- **Use Result for operations that can fail** with meaningful error types
+- **Chain operations** with `map`, `andThen`, `filter` instead of nested if statements
+- **Use `safe()` for external APIs** that might throw
+- **Use `all()` for parallel operations** that must all succeed
+- **Use `any()` for fallback chains** where first success matters
+- **Match exhaustively** to handle all cases
+- **Nest Option/Result** to distinguish multiple failure modes
+- **Use nonNull() for truly nullable values** when you need to keep 0, false, ""
+- **Use intoTuple() for Go-style error handling** when interacting with such APIs
+- **Use `unwrapOrThrow()` in tasks** when you want automatic error logging with context
+- **Use `unwrapOrDefault()` for graceful degradation** with non-critical operations
+
+### ❌ Don't
+
+- **Don't use unwrap() without confidence** - prefer `unwrapOr()`, `unwrapOrThrow()`, or pattern matching
+- **Don't ignore None/Err cases** - always handle both paths
+- **Don't create `Result<T, null>`** - use Option instead (unless matching external API)
+- **Don't use Option/Result for sync when value is never nullable** - adds unnecessary overhead
+- **Don't forget to await** when using `safe()` with Promises
+- **Don't mix paradigms unnecessarily** - if using oxide.ts, commit to it
+- **Don't use plain `unwrap()` in production** - use helpers that provide better error context
+
+## Common Patterns
+
+### API Response Handling
+
+```ts
+import { unwrapOrThrow, unwrapOrDefault } from "@repo/utils/result";
+
+async function fetchUser(id: string): Promise<Result<User, Error>> {
+  return Result.safe(
+    fetch(`/api/users/${id}`).then((r) =>
+      r.ok ? r.json() : Promise.reject(new Error(r.statusText))
+    )
+  );
+}
+
+// In critical path - throw with context if fails
+const user = unwrapOrThrow(await fetchUser("123"), {
+  logger,
+  message: "Failed to fetch user",
+  context: { userId: "123" }
+});
+
+// Non-critical - use default guest user
+const user = unwrapOrDefault(
+  await fetchUser("123"),
+  { id: "unknown", name: "Guest" }
+);
+```
+
+### Database Query with Multiple Failure Modes
+
+```ts
+import { unwrapOrThrow } from "@repo/utils/result";
+
+function findUser(id: string): Result<Option<User>, DbError> {
+  try {
+    const user = db.query("SELECT * FROM users WHERE id = ?", [id]);
+    return Ok(user ? Some(user) : None);
+  } catch (error) {
+    return Err(new DbError(error));
+  }
+}
+
+// Pattern matching for all cases
+const message = match(findUser("123"), {
+  Ok: {
+    Some: (user) => `Found: ${user.name}`,
+    None: () => "User not found",
+  },
+  Err: (error) => `Database error: ${error}`,
+});
+
+// Or unwrap with error handling in tasks
+const userOption = unwrapOrThrow(findUser("123"), {
+  logger,
+  message: "Database query failed",
+  context: { userId: "123" }
+});
+
+if (userOption.isSome()) {
+  const user = userOption.unwrap();
+  // Process user
+}
+```
+
+### Form Validation
+
+```ts
+import { unwrapOrThrow } from "@repo/utils/result";
+
+function validateEmail(email: string): Result<string, string> {
+  return email.includes("@") ? Ok(email) : Err("Invalid email format");
+}
+
+function validateAge(age: number): Result<number, string> {
+  return age >= 18 ? Ok(age) : Err("Must be 18 or older");
+}
+
+const formResult = Result.all(
+  validateEmail("user@example.com"),
+  validateAge(25)
+);
+
+// Traditional approach
+if (formResult.isOk()) {
+  const [email, age] = formResult.unwrap();
+  submitForm({ email, age });
+} else {
+  showError(formResult.unwrapErr());
+}
+
+// Or with helper in server/task context
+const [email, age] = unwrapOrThrow(formResult, {
+  message: "Form validation failed"
+});
+submitForm({ email, age });
+```
+
+### Fallback Chain
+
+```ts
+function getConfig(): Option<Config> {
+  return Option.any(
+    Option(process.env.CONFIG_JSON).map(JSON.parse),
+    Option(localStorage.getItem("config")).map(JSON.parse),
+    Some(DEFAULT_CONFIG)
+  );
+}
+```
+
+## Migration from Traditional Error Handling
+
+```ts
+// ❌ Before: Traditional
+function divide(x: number, by: number): number {
+  if (by === 0) {
+    throw new Error("Division by zero");
+  }
+  return x / by;
+}
+
+try {
+  const result = divide(10, 0);
+  console.log(result);
+} catch (error) {
+  console.error(error);
+}
+
+// ✅ After: With Result
+function divide(x: number, by: number): Result<number, string> {
+  return by === 0 ? Err("Division by zero") : Ok(x / by);
+}
+
+const result = divide(10, 0);
+match(result, {
+  Ok: (val) => console.log(val),
+  Err: (err) => console.error(err),
+});
+```
+
+---
+
+**Remember:** oxide.ts makes error handling explicit and forces you to think about both success and failure paths at compile time, leading to more robust code.
