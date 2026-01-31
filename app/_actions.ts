@@ -2,6 +2,8 @@
 
 import FirecrawlApp from "@mendable/firecrawl-js";
 import OpenAI from "openai";
+import RunwayML from "@runwayml/sdk";
+import { ElevenLabsClient } from "elevenlabs";
 import { z } from "zod";
 
 // Product info type for extraction
@@ -970,5 +972,122 @@ export async function generateStoryboards(
   return {
     clips,
     generatedAt: new Date().toISOString(),
+  };
+}
+
+// Video + voiceover generation result type
+export type ClipGenerationResult =
+  | { success: true; videoUrl: string; audioUrl: string }
+  | { success: false; error: string };
+
+// Generate voiceover audio using ElevenLabs REST API
+async function generateVoiceover(text: string): Promise<{ success: true; audioUrl: string } | { success: false; error: string }> {
+  const apiKey = (process.env.ELEVEN_API_KEY || process.env.ELEVENLABS_API_KEY)?.trim();
+  
+  if (!apiKey) {
+    return { success: false, error: "ELEVEN_API_KEY not configured" };
+  }
+
+  try {
+    console.log("Generating voiceover for:", text.slice(0, 50) + "...");
+
+    // Use REST API directly for better error handling
+    const voiceId = "21m00Tcm4TlvDq8ikWAM"; // Rachel - default voice
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+      method: "POST",
+      headers: {
+        "xi-api-key": apiKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        text,
+        model_id: "eleven_monolingual_v1",
+        voice_settings: {
+          stability: 0.5,
+          similarity_boost: 0.5,
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("ElevenLabs error:", response.status, errorText);
+      return { success: false, error: `ElevenLabs API error: ${response.status} - ${errorText}` };
+    }
+
+    const audioBuffer = await response.arrayBuffer();
+    const base64 = Buffer.from(audioBuffer).toString("base64");
+    const audioUrl = `data:audio/mpeg;base64,${base64}`;
+
+    console.log("Voiceover generation complete");
+    return { success: true, audioUrl };
+  } catch (error) {
+    console.error("Voiceover generation error:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to generate voiceover",
+    };
+  }
+}
+
+// Generate video from a clip prompt using RunwayML
+async function generateVideoOnly(promptText: string): Promise<{ success: true; videoUrl: string } | { success: false; error: string }> {
+  if (!process.env.RUNWAYML_API_SECRET) {
+    return { success: false, error: "RUNWAYML_API_SECRET not configured" };
+  }
+
+  try {
+    const client = new RunwayML();
+
+    console.log("Starting video generation for:", promptText.slice(0, 50) + "...");
+
+    const task = await client.textToVideo
+      .create({
+        model: "veo3.1_fast",
+        promptText,
+        ratio: "1280:720",
+        duration: 4,
+      })
+      .waitForTaskOutput();
+
+    console.log("Video generation complete:", task);
+
+    if (task.output && Array.isArray(task.output) && task.output[0]) {
+      return { success: true, videoUrl: task.output[0] };
+    }
+
+    return { success: false, error: "No video output returned" };
+  } catch (error) {
+    console.error("Video generation error:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to generate video",
+    };
+  }
+}
+
+// Generate both video and voiceover for a clip
+export async function generateClipMedia(
+  videoPrompt: string,
+  voiceoverText: string
+): Promise<ClipGenerationResult> {
+  // Run both in parallel
+  const [videoResult, audioResult] = await Promise.all([
+    generateVideoOnly(videoPrompt),
+    generateVoiceover(voiceoverText),
+  ]);
+
+  if (!videoResult.success) {
+    return { success: false, error: `Video: ${videoResult.error}` };
+  }
+
+  if (!audioResult.success) {
+    return { success: false, error: `Audio: ${audioResult.error}` };
+  }
+
+  return {
+    success: true,
+    videoUrl: videoResult.videoUrl,
+    audioUrl: audioResult.audioUrl,
   };
 }

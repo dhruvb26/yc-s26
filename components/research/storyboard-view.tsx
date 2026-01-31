@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
-import { Copy, Check, MessageSquare, Video } from "lucide-react";
-import type { VideoClip } from "@/app/_actions";
+import { useState, useTransition, useRef, useEffect } from "react";
+import { Copy, Check, MessageSquare, Video, Play, Loader2, Pause } from "lucide-react";
+import { type VideoClip, generateClipMedia } from "@/app/_actions";
 
 interface StoryboardViewProps {
   clips: VideoClip[];
@@ -28,6 +28,14 @@ export function StoryboardView({ clips }: StoryboardViewProps) {
 
 function ClipCard({ clip }: { clip: VideoClip }) {
   const [copiedField, setCopiedField] = useState<"prompt" | "voiceover" | null>(null);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+  const [isPlaying, setIsPlaying] = useState(false);
+
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
 
   const handleCopy = async (text: string, field: "prompt" | "voiceover") => {
     await navigator.clipboard.writeText(text);
@@ -35,19 +43,113 @@ function ClipCard({ clip }: { clip: VideoClip }) {
     setTimeout(() => setCopiedField(null), 2000);
   };
 
+  const handleGenerateVideo = () => {
+    setError(null);
+    startTransition(async () => {
+      const result = await generateClipMedia(clip.prompt, clip.voiceover);
+      if (result.success) {
+        setVideoUrl(result.videoUrl);
+        setAudioUrl(result.audioUrl);
+      } else {
+        setError(result.error);
+      }
+    });
+  };
+
+  const handlePlayPause = () => {
+    if (!videoRef.current) return;
+
+    if (isPlaying) {
+      videoRef.current.pause();
+      audioRef.current?.pause();
+    } else {
+      videoRef.current.play();
+      audioRef.current?.play();
+    }
+    setIsPlaying(!isPlaying);
+  };
+
+  // Auto-play when video loads
+  useEffect(() => {
+    if (videoUrl && videoRef.current && audioRef.current) {
+      const playMedia = async () => {
+        try {
+          await videoRef.current?.play();
+          await audioRef.current?.play();
+          setIsPlaying(true);
+        } catch {
+          // Auto-play blocked
+        }
+      };
+      playMedia();
+    }
+  }, [videoUrl]);
+
+  // Sync video end
+  const handleVideoEnd = () => {
+    setIsPlaying(false);
+    if (videoRef.current) videoRef.current.currentTime = 0;
+    if (audioRef.current) audioRef.current.currentTime = 0;
+  };
+
   return (
     <div className="rounded-lg border bg-background overflow-hidden">
       <div className="flex">
-        {/* Left: Label */}
+        {/* Left: Label + Video Preview */}
         <div className="w-40 shrink-0 p-4 bg-muted/30 border-r flex flex-col justify-center">
-          <div className="flex items-center justify-center h-16 mb-3">
-            <div className="size-10 rounded-lg bg-muted flex items-center justify-center">
-              <Video className="size-5 text-muted-foreground" />
+          {videoUrl ? (
+            <div className="relative mb-3">
+              <video
+                ref={videoRef}
+                src={videoUrl}
+                className="w-full aspect-video rounded bg-black"
+                playsInline
+                onEnded={handleVideoEnd}
+              />
+              {audioUrl && <audio ref={audioRef} src={audioUrl} />}
+              <button
+                onClick={handlePlayPause}
+                className="absolute inset-0 flex items-center justify-center bg-black/30 hover:bg-black/40 transition-colors"
+              >
+                {isPlaying ? (
+                  <Pause className="size-6 text-white" />
+                ) : (
+                  <Play className="size-6 text-white ml-0.5" />
+                )}
+              </button>
             </div>
-          </div>
-          <div className="px-2 py-1 rounded bg-background border text-xs font-medium text-center">
+          ) : (
+            <div className="flex items-center justify-center h-16 mb-3">
+              <div className="size-10 rounded-lg bg-muted flex items-center justify-center">
+                <Video className="size-5 text-muted-foreground" />
+              </div>
+            </div>
+          )}
+          <div className="px-2 py-1 rounded bg-background border text-xs font-medium text-center mb-2">
             {clip.label}
           </div>
+          {!videoUrl && (
+            <button
+              onClick={handleGenerateVideo}
+              disabled={isPending}
+              className="flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs font-medium bg-foreground text-background rounded hover:opacity-90 transition-opacity disabled:opacity-50"
+            >
+              {isPending ? (
+                <>
+                  <Loader2 className="size-3 animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <Play className="size-3" />
+                  Generate Video
+                </>
+              )}
+            </button>
+          )}
+          {error && (
+            <p className="text-xs text-destructive mt-1 text-center">{error}</p>
+          )}
         </div>
 
         {/* Right: Content */}
