@@ -852,6 +852,7 @@ function getOpenAI() {
 // Generate and validate video clips using GPT-4.1
 async function generateClipsWithAI(
   productName: string,
+  brandName: string | undefined,
   painPoints: string[],
   competitors: string[],
   features: string[]
@@ -859,34 +860,46 @@ async function generateClipsWithAI(
   try {
     const openai = getOpenAI();
 
+    // Build branded product identifier for prompts
+    const brandedProduct = brandName 
+      ? `${brandName} ${productName}` 
+      : productName;
+
     const response = await openai.chat.completions.create({
       model: "gpt-4.1",
       messages: [
         {
           role: "system",
-          content: `You are a short-form video ad creator. Generate video clips for a product ad.
+          content: `You are a short-form video ad creator specializing in product B-roll footage. Generate video clips that showcase ONLY the product itself - no people, no hands, no faces.
+
+CRITICAL RULES:
+- Every prompt MUST be product-only B-roll footage
+- NO people, hands, faces, or human elements in any prompt
+- Focus on: product shots, close-ups, rotating views, product features, textures, materials
+- Use cinematic language: "macro shot", "rotating product", "studio lighting", "clean background", "floating product", "detail shot"
+- BRANDING: Include the product name "${brandedProduct}" or brand "${brandName || productName}" in prompts where appropriate (e.g., on packaging, logo visible on product, branded box, etc.)
+- When showing packaging or product labels, ensure the brand name is visible and readable
 
 Each clip needs:
-1. label: Short label like "Hook", "Problem", "Solution", "B-roll-product", "Testimonial", "CTA"
-2. prompt: Direction for video generation (what visuals to show)
-3. voiceover: The exact text to be spoken as audio (keep each under 15 words)
+1. label: Short label like "Hero Shot", "Detail", "Feature", "Texture", "Rotating", "Close-up"
+2. prompt: B-roll direction (product-only visuals, NO people) - INCLUDE BRAND NAME/LOGO visibility where natural
+3. voiceover: The exact text to be spoken as audio (keep each under 15 words) - can mention the brand/product name
 
-Output valid JSON array of clips. Generate 4-6 clips that flow together as a cohesive ad.`
+Output valid JSON array of clips. Generate 4-6 clips that flow together as a cohesive product showcase.`
         },
         {
           role: "user",
           content: `Product: ${productName}
+Brand: ${brandName || "N/A"}
+Full branded name: ${brandedProduct}
 
-Pain points users have:
+Pain points this product solves:
 ${painPoints.slice(0, 3).map(p => `- ${p}`).join("\n") || "- General frustration with alternatives"}
 
-Competitors:
-${competitors.slice(0, 2).map(c => `- ${c}`).join("\n") || "- Other products in the market"}
-
-Key features:
+Key features to highlight:
 ${features.slice(0, 3).map(f => `- ${f}`).join("\n") || "- Quality and reliability"}
 
-Generate a JSON array of video clips. Return ONLY the JSON, no explanation:`
+Generate B-roll focused video clips. Remember: PRODUCT ONLY, no people or hands. Include brand name "${brandName || productName}" visible on product/packaging where natural. Return ONLY the JSON, no explanation:`
         }
       ],
       max_tokens: 800,
@@ -918,51 +931,53 @@ export async function generateStoryboards(
   console.log("Generating video clips for:", product.title);
 
   const productName = product.title || product.brand || "this product";
+  const brandName = product.brand;
 
   // Extract research data
   const painPoints = research.painPoints.map(p => p.issue);
   const competitors = research.competitors.map(c => c.productName || c.brand);
   const features = product.features || (product.description ? [product.description] : []);
 
-  // Generate clips with AI
+  // Generate clips with AI (now includes brand name for branding)
   console.log("Generating clips with GPT-4.1...");
-  let clips = await generateClipsWithAI(productName, painPoints, competitors, features);
+  let clips = await generateClipsWithAI(productName, brandName, painPoints, competitors, features);
 
-  // Fallback if AI fails
+  // Fallback if AI fails - product-only B-roll with branding
   if (clips.length === 0) {
     const shortName = product.brand || productName.split(" ")[0];
-    const painPoint = painPoints[0] || "struggling with alternatives";
+    const brandedProduct = brandName ? `${brandName} ${productName}` : productName;
+    const mainFeature = features[0] || "premium quality";
 
     clips = [
       {
         id: crypto.randomUUID(),
-        label: "Hook",
-        prompt: `Person looking frustrated, relatable moment, casual setting`,
-        voiceover: `Ever felt like your current solution just isn't cutting it?`,
+        label: "Hero Shot",
+        prompt: `${brandedProduct} product floating on clean white background, ${brandName || shortName} logo visible on packaging, soft studio lighting, rotating slowly, 4K cinematic`,
+        voiceover: `Introducing ${shortName}. Built different.`,
       },
       {
         id: crypto.randomUUID(),
-        label: "Problem",
-        prompt: `Quick cuts showing common frustrations, real scenarios`,
-        voiceover: `${painPoint.slice(0, 40)}. We've all been there.`,
+        label: "Detail",
+        prompt: `Extreme macro close-up of ${brandedProduct} texture and materials, brand embossing visible, shallow depth of field, premium feel`,
+        voiceover: `Crafted with precision. Every detail matters.`,
       },
       {
         id: crypto.randomUUID(),
-        label: "B-roll-product",
-        prompt: `Clean product shot, ${shortName} in focus, professional lighting`,
-        voiceover: `That's why ${shortName} exists.`,
+        label: "Feature",
+        prompt: `${brandedProduct} with ${brandName || shortName} branding visible, product shot highlighting key feature, dramatic lighting, clean background, slow motion`,
+        voiceover: `${mainFeature.slice(0, 30)}. This changes everything.`,
       },
       {
         id: crypto.randomUUID(),
-        label: "Demo",
-        prompt: `Product in action, hands using it, showing key feature`,
-        voiceover: `It just works. No hassle. No frustration.`,
+        label: "Rotating",
+        prompt: `360 degree rotating shot of ${brandedProduct}, ${brandName || shortName} logo in view, studio lighting, seamless loop, product showcase`,
+        voiceover: `See it from every angle. Pure craftsmanship.`,
       },
       {
         id: crypto.randomUUID(),
-        label: "CTA",
-        prompt: `Product with text overlay, clean background, call to action`,
-        voiceover: `Try it yourself. Link in bio.`,
+        label: "Close-up",
+        prompt: `${brandedProduct} hero shot with ${brandName || shortName} packaging visible, dramatic shadows, minimal background, product photography style`,
+        voiceover: `${shortName}. Available now.`,
       },
     ];
   }
@@ -975,25 +990,35 @@ export async function generateStoryboards(
   };
 }
 
+// Word timing for subtitles
+export type WordTiming = {
+  word: string;
+  start: number; // seconds
+  end: number;   // seconds
+};
+
 // Video + voiceover generation result type
 export type ClipGenerationResult =
-  | { success: true; videoUrl: string; audioUrl: string }
+  | { success: true; videoUrl: string; audioUrl: string; wordTimings: WordTiming[] }
   | { success: false; error: string };
 
-// Generate voiceover audio using ElevenLabs REST API
-async function generateVoiceover(text: string): Promise<{ success: true; audioUrl: string } | { success: false; error: string }> {
+// Generate voiceover audio with word-level timestamps using ElevenLabs REST API
+async function generateVoiceover(text: string): Promise<
+  | { success: true; audioUrl: string; wordTimings: WordTiming[] }
+  | { success: false; error: string }
+> {
   const apiKey = (process.env.ELEVEN_API_KEY || process.env.ELEVENLABS_API_KEY)?.trim();
-  
+
   if (!apiKey) {
     return { success: false, error: "ELEVEN_API_KEY not configured" };
   }
 
   try {
-    console.log("Generating voiceover for:", text.slice(0, 50) + "...");
+    console.log("Generating voiceover with timestamps for:", text.slice(0, 50) + "...");
 
-    // Use REST API directly for better error handling
+    // Use the with-timestamps endpoint for word-level timing
     const voiceId = "21m00Tcm4TlvDq8ikWAM"; // Rachel - default voice
-    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/with-timestamps`, {
       method: "POST",
       headers: {
         "xi-api-key": apiKey,
@@ -1015,12 +1040,57 @@ async function generateVoiceover(text: string): Promise<{ success: true; audioUr
       return { success: false, error: `ElevenLabs API error: ${response.status} - ${errorText}` };
     }
 
-    const audioBuffer = await response.arrayBuffer();
-    const base64 = Buffer.from(audioBuffer).toString("base64");
-    const audioUrl = `data:audio/mpeg;base64,${base64}`;
+    const data = await response.json() as {
+      audio_base64: string;
+      alignment: {
+        characters: string[];
+        character_start_times_seconds: number[];
+        character_end_times_seconds: number[];
+      };
+    };
 
-    console.log("Voiceover generation complete");
-    return { success: true, audioUrl };
+    const audioUrl = `data:audio/mpeg;base64,${data.audio_base64}`;
+
+    // Convert character-level timings to word-level timings
+    const wordTimings: WordTiming[] = [];
+    const { characters, character_start_times_seconds, character_end_times_seconds } = data.alignment;
+
+    let currentWord = "";
+    let wordStart = 0;
+    let wordEnd = 0;
+
+    for (let i = 0; i < characters.length; i++) {
+      const char = characters[i];
+      const charStart = character_start_times_seconds[i];
+      const charEnd = character_end_times_seconds[i];
+
+      if (char === " " || i === characters.length - 1) {
+        // End of word
+        if (i === characters.length - 1 && char !== " ") {
+          currentWord += char;
+          wordEnd = charEnd;
+        }
+
+        if (currentWord.trim()) {
+          wordTimings.push({
+            word: currentWord.trim(),
+            start: wordStart,
+            end: wordEnd,
+          });
+        }
+        currentWord = "";
+        wordStart = charEnd; // Next word starts after this space
+      } else {
+        if (currentWord === "") {
+          wordStart = charStart;
+        }
+        currentWord += char;
+        wordEnd = charEnd;
+      }
+    }
+
+    console.log(`Voiceover generation complete with ${wordTimings.length} words`);
+    return { success: true, audioUrl, wordTimings };
   } catch (error) {
     console.error("Voiceover generation error:", error);
     return {
@@ -1089,5 +1159,360 @@ export async function generateClipMedia(
     success: true,
     videoUrl: videoResult.videoUrl,
     audioUrl: audioResult.audioUrl,
+    wordTimings: audioResult.wordTimings,
   };
+}
+
+// ============================================
+// INFLUENCER DISCOVERY & EMAIL OUTREACH
+// ============================================
+
+export type Influencer = {
+  id: string;
+  name: string;
+  handle: string;
+  platform: "instagram" | "tiktok" | "twitter" | "youtube";
+  followers?: string;
+  niche?: string;
+  bio?: string;
+  profileUrl: string;
+  email?: string;
+  relevanceScore: number; // 1-10
+  reasoning: string; // Why this influencer is a good fit for this product
+};
+
+export type EmailDraft = {
+  id: string;
+  influencer: Influencer;
+  subject: string;
+  body: string;
+  status: "draft" | "sent" | "failed";
+  sentAt?: string;
+};
+
+export type InfluencerSearchResult = {
+  influencers: Influencer[];
+  searchSummary: string;
+};
+
+// Zod schema for influencer extraction
+const InfluencerSchema = z.object({
+  influencers: z.array(
+    z.object({
+      name: z.string().describe("Full name or display name of the influencer"),
+      handle: z.string().describe("Social media handle/username (e.g., @username)"),
+      platform: z.enum(["instagram", "tiktok", "twitter", "youtube"]).describe("Primary platform"),
+      followers: z.string().optional().describe("Follower count (e.g., '100K', '1.2M')"),
+      niche: z.string().optional().describe("Content niche (e.g., 'tech reviews', 'fashion', 'fitness')"),
+      bio: z.string().optional().describe("Short bio or description"),
+      profileUrl: z.string().describe("URL to their profile"),
+      email: z.string().optional().describe("Contact email if available"),
+      relevanceScore: z.number().min(1).max(10).describe("How relevant this influencer is for the product (1-10)"),
+      reasoning: z.string().describe("1-2 sentence explanation of WHY this influencer is a good fit for promoting this specific product - their audience overlap, content style match, etc."),
+    })
+  ).describe("List of relevant influencers found"),
+});
+
+// Find influencers relevant to a product using Firecrawl search
+export async function findInfluencers(
+  productName: string,
+  category: string,
+  brand?: string
+): Promise<InfluencerSearchResult> {
+  console.log("\n========================================");
+  console.log("🔍 STARTING INFLUENCER DISCOVERY");
+  console.log("========================================");
+  console.log("Product:", productName);
+  console.log("Category:", category);
+
+  const firecrawl = getFirecrawl();
+
+  // Build search queries for different platforms
+  const queries = [
+    // Instagram influencers
+    `${category} influencer instagram "contact" OR "email" OR "collab" -site:facebook.com`,
+    `"${category}" creator instagram followers brand partnership`,
+    // TikTok creators
+    `${category} TikTok creator "brand deals" OR "partnerships" OR "contact"`,
+    `"${category}" tiktoker popular reviews sponsored`,
+    // Twitter/X thought leaders
+    `${category} twitter influencer "${brand || productName}" OR "reviews" followers`,
+    // YouTube reviewers
+    `${category} youtube reviewer channel "contact" OR "business inquiries"`,
+    `"${category}" youtuber unboxing review subscribers`,
+  ];
+
+  type SearchResultItem = {
+    title?: string;
+    url?: string;
+    description?: string;
+    markdown?: string;
+  };
+
+  const allResults: Array<{
+    title: string;
+    url: string;
+    description: string;
+    content?: string;
+    platform: Influencer["platform"];
+  }> = [];
+
+  // Run searches in parallel
+  const searchPromises = queries.map(async (query, i) => {
+    try {
+      console.log(`🔎 Search ${i + 1}: "${query.slice(0, 50)}..."`);
+
+      const response = await firecrawl.search(query, { limit: 6 });
+
+      let items: SearchResultItem[] = [];
+      const anyResponse = response as Record<string, unknown>;
+
+      if ("web" in anyResponse && Array.isArray(anyResponse.web)) {
+        items = anyResponse.web as SearchResultItem[];
+      } else if ("data" in anyResponse && Array.isArray(anyResponse.data)) {
+        items = anyResponse.data as SearchResultItem[];
+      }
+
+      // Determine platform from query index
+      let platform: Influencer["platform"] = "instagram";
+      if (i >= 2 && i < 4) platform = "tiktok";
+      else if (i === 4) platform = "twitter";
+      else if (i >= 5) platform = "youtube";
+
+      return items
+        .filter(item => item.url && item.title)
+        .map(item => ({
+          url: item.url!,
+          title: item.title!,
+          description: item.description || "",
+          platform,
+        }));
+    } catch (error) {
+      console.error(`❌ Search ${i + 1} FAILED:`, error);
+      return [];
+    }
+  });
+
+  const searchResults = await Promise.all(searchPromises);
+
+  for (const results of searchResults) {
+    allResults.push(...results);
+  }
+
+  console.log(`📊 Found ${allResults.length} raw results`);
+
+  // Deduplicate by URL
+  const uniqueResults = allResults.filter(
+    (item, i, arr) => arr.findIndex(x => x.url === item.url) === i
+  ).slice(0, 20);
+
+  // Use OpenAI to extract structured influencer data
+  const openai = getOpenAI();
+
+  const influencerData = uniqueResults.map(r =>
+    `Platform: ${r.platform}\nTitle: ${r.title}\nURL: ${r.url}\nDescription: ${r.description}`
+  ).join("\n\n---\n\n");
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4.1",
+      messages: [
+        {
+          role: "system",
+          content: `You are an influencer marketing expert. Extract influencer profiles from search results.
+
+For each valid influencer found, extract:
+- name: Their display name
+- handle: Their social handle (with @)
+- platform: instagram, tiktok, twitter, or youtube
+- followers: Follower count if mentioned
+- niche: Their content focus
+- bio: Brief description
+- profileUrl: Direct link to their profile
+- email: Contact email if found
+- relevanceScore: 1-10 how relevant they are for promoting "${productName}" in the "${category}" space
+- reasoning: 1-2 sentences explaining WHY this influencer is a great fit for this specific product. Focus on audience overlap, content style match, past brand collaborations in similar categories, or their authentic voice in this space. Be specific about the product-influencer synergy.
+
+Only include actual influencers/creators, not brands or news articles. Return valid JSON.`
+        },
+        {
+          role: "user",
+          content: `Product to promote: ${productName}
+Category: ${category}
+Brand: ${brand || "N/A"}
+
+Search results to analyze:
+${influencerData}
+
+Extract influencers as JSON. For each influencer, INCLUDE a "reasoning" field explaining why they're a good fit for promoting "${productName}". Return ONLY the JSON object with an "influencers" array:`
+        }
+      ],
+      max_tokens: 2500,
+      temperature: 0.3,
+    });
+
+    const content = response.choices[0]?.message?.content?.trim() || '{"influencers":[]}';
+    const jsonStr = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+    const parsed = JSON.parse(jsonStr) as { influencers: Array<Omit<Influencer, "id">> };
+
+    const influencers: Influencer[] = parsed.influencers.map(inf => ({
+      ...inf,
+      id: crypto.randomUUID(),
+      reasoning: inf.reasoning || "Content aligns with this product category.",
+    }));
+
+    // Sort by relevance
+    influencers.sort((a, b) => b.relevanceScore - a.relevanceScore);
+
+    console.log(`✅ Extracted ${influencers.length} influencers`);
+
+    return {
+      influencers: influencers.slice(0, 10), // Top 10
+      searchSummary: `Found ${influencers.length} relevant influencers for ${productName} in the ${category} space.`,
+    };
+  } catch (error) {
+    console.error("Influencer extraction error:", error);
+    return {
+      influencers: [],
+      searchSummary: "Failed to extract influencer data",
+    };
+  }
+}
+
+// Generate email drafts for influencer outreach
+export async function generateOutreachEmails(
+  influencers: Influencer[],
+  product: ProductInfo,
+  videoUrl?: string
+): Promise<EmailDraft[]> {
+  console.log("📧 Generating outreach emails for", influencers.length, "influencers");
+
+  const openai = getOpenAI();
+  const productName = product.title || product.brand || "our product";
+  const brandName = product.brand || "Our brand";
+
+  const drafts: EmailDraft[] = [];
+
+  for (const influencer of influencers) {
+    try {
+      const response = await openai.chat.completions.create({
+        model: "gpt-4.1",
+        messages: [
+          {
+            role: "system",
+            content: `You are a brand partnership manager writing personalized influencer outreach emails.
+
+Write emails that are:
+- Personalized to the influencer's niche and style
+- Professional but friendly
+- Clear about the collaboration opportunity
+- Include a specific call to action
+- Keep it concise (under 200 words)
+
+The brand has created a sample video ad that showcases how influencers could feature the product.`
+          },
+          {
+            role: "user",
+            content: `Write an outreach email to:
+Name: ${influencer.name}
+Handle: ${influencer.handle}
+Platform: ${influencer.platform}
+Niche: ${influencer.niche || "content creation"}
+Followers: ${influencer.followers || "N/A"}
+
+Product: ${productName}
+Brand: ${brandName}
+Product description: ${product.description || "Premium quality product"}
+Price: ${product.price || "N/A"}
+
+${videoUrl ? "We have a sample video showcasing the product that will be included in the email." : ""}
+
+Return JSON with "subject" and "body" fields only:`
+          }
+        ],
+        max_tokens: 500,
+        temperature: 0.7,
+      });
+
+      const content = response.choices[0]?.message?.content?.trim() || '{}';
+      const jsonStr = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+      const email = JSON.parse(jsonStr) as { subject: string; body: string };
+
+      drafts.push({
+        id: crypto.randomUUID(),
+        influencer,
+        subject: email.subject,
+        body: email.body,
+        status: "draft",
+      });
+    } catch (error) {
+      console.error(`Failed to generate email for ${influencer.name}:`, error);
+    }
+  }
+
+  console.log(`✅ Generated ${drafts.length} email drafts`);
+  return drafts;
+}
+
+// Send email via Resend
+export async function sendOutreachEmail(
+  draft: EmailDraft,
+  fromEmail: string,
+  videoUrl?: string
+): Promise<{ success: boolean; error?: string }> {
+  const resendApiKey = process.env.RESEND_API_KEY;
+
+  if (!resendApiKey) {
+    return { success: false, error: "RESEND_API_KEY not configured" };
+  }
+
+  if (!draft.influencer.email) {
+    return { success: false, error: "Influencer has no email address" };
+  }
+
+  try {
+    // Build email HTML with optional video embed
+    let htmlBody = draft.body.replace(/\n/g, "<br>");
+
+    if (videoUrl) {
+      htmlBody += `
+        <br><br>
+        <p><strong>Check out this sample video we created:</strong></p>
+        <p><a href="${videoUrl}" style="color: #3b82f6;">Watch Sample Video</a></p>
+      `;
+    }
+
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${resendApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: fromEmail,
+        to: draft.influencer.email,
+        subject: draft.subject,
+        html: `
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            ${htmlBody}
+          </div>
+        `,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("Resend error:", response.status, errorText);
+      return { success: false, error: `Resend API error: ${response.status}` };
+    }
+
+    console.log(`✅ Email sent to ${draft.influencer.email}`);
+    return { success: true };
+  } catch (error) {
+    console.error("Email send error:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to send email",
+    };
+  }
 }

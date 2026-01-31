@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { ArrowRight, ArrowLeft } from "lucide-react";
+import { ArrowRight, ArrowLeft, Users } from "lucide-react";
 import {
   scrapeProductUrl,
   refreshProductResearch,
@@ -14,17 +14,20 @@ import { ResearchProgress } from "./research/research-progress";
 import { ProductDetails } from "./research/product-details";
 import { ResearchResults } from "./research/research-results";
 import { StoryboardView } from "./research/storyboard-view";
+import { InfluencerOutreach } from "./research/influencer-outreach";
 
 // Hardcoded URL for testing
 const DEFAULT_URL = "https://www.amazon.com/Mens-Cloud-Black-11-Medium/dp/B0D31TQ9LW";
 
-type Stage = "input" | "analyzing" | "results" | "creative";
+type Stage = "input" | "analyzing" | "results" | "creative" | "outreach";
 
 export function ProductScraper() {
   const [url, setUrl] = useState(DEFAULT_URL);
   const [stage, setStage] = useState<Stage>("input");
   const [result, setResult] = useState<ScrapeResult | null>(null);
   const [creative, setCreative] = useState<CreativeOutput | null>(null);
+  const [generatedVideoUrl, setGeneratedVideoUrl] = useState<string | null>(null);
+  const [generatedAudioUrl, setGeneratedAudioUrl] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [isRefreshing, startRefreshTransition] = useTransition();
   const [isGenerating, startGenerateTransition] = useTransition();
@@ -73,6 +76,19 @@ export function ProductScraper() {
     setStage("results");
   };
 
+  const handleGoToOutreach = () => {
+    setStage("outreach");
+  };
+
+  const handleBackToCreative = () => {
+    setStage("creative");
+  };
+
+  // Callback to receive generated video and audio URLs from StoryboardView
+  const handleMediaGenerated = (videoUrl: string, audioUrl: string) => {
+    setGeneratedVideoUrl(videoUrl);
+    setGeneratedAudioUrl(audioUrl);
+  };
 
   // Stage 1: URL Input
   if (stage === "input") {
@@ -95,6 +111,20 @@ export function ProductScraper() {
     );
   }
 
+  // Stage 5: Influencer Outreach
+  if (stage === "outreach" && result?.success) {
+    return (
+      <div className="h-full">
+        <InfluencerOutreach
+          product={result.data}
+          videoUrl={generatedVideoUrl || undefined}
+          audioUrl={generatedAudioUrl || undefined}
+          onBack={handleBackToCreative}
+        />
+      </div>
+    );
+  }
+
   // Stage 4: Creative - Storyboards
   if (stage === "creative" && creative && result?.success) {
     return (
@@ -107,27 +137,25 @@ export function ProductScraper() {
             <ArrowLeft className="size-3.5" />
             Back to research
           </button>
-          <p className="text-sm text-muted-foreground">
-            {creative.clips.length} clips generated
-          </p>
+          <div className="flex items-center gap-4">
+            <ProductMini product={result.data} />
+            <p className="text-sm text-muted-foreground">
+              {creative.clips.length} clips
+            </p>
+            <button
+              onClick={handleGoToOutreach}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-foreground text-background rounded-md hover:opacity-90 transition-opacity"
+            >
+              <Users className="size-3.5" />
+              Find Influencers
+            </button>
+          </div>
         </div>
-        <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-8 min-h-0 pt-6">
-          <div className="overflow-y-auto pr-2">
-            <div className="space-y-4">
-              <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                Product
-              </h3>
-              <ProductSummary product={result.data} />
-            </div>
-          </div>
-          <div className="overflow-y-auto pr-2">
-            <div className="space-y-4">
-              <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                Video Clips
-              </h3>
-              <StoryboardView clips={creative.clips} />
-            </div>
-          </div>
+        <div className="flex-1 overflow-y-auto pt-6 pr-2">
+          <StoryboardView 
+            clips={creative.clips} 
+            onMediaGenerated={handleMediaGenerated}
+          />
         </div>
       </div>
     );
@@ -185,11 +213,11 @@ export function ProductScraper() {
   );
 }
 
-function ProductSummary({ product }: { product: import("@/app/_actions").ProductInfo }) {
+function ProductMini({ product }: { product: import("@/app/_actions").ProductInfo }) {
   return (
-    <div className="p-4 rounded-lg border bg-muted/20 space-y-3">
+    <div className="flex items-center gap-3">
       {product.imageUrl?.startsWith("http") && (
-        <div className="w-20 h-20 rounded border bg-background overflow-hidden">
+        <div className="size-8 rounded border bg-background overflow-hidden shrink-0">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={product.imageUrl}
@@ -198,16 +226,11 @@ function ProductSummary({ product }: { product: import("@/app/_actions").Product
           />
         </div>
       )}
-      <div>
-        {product.brand && (
-          <p className="text-xs text-muted-foreground uppercase tracking-wide">{product.brand}</p>
-        )}
-        <p className="font-semibold">{product.title || "Product"}</p>
-        {product.price && <p className="text-sm text-muted-foreground">{product.price}</p>}
+      <div className="min-w-0">
+        <p className="text-sm font-medium truncate max-w-[200px]">
+          {product.title || "Product"}
+        </p>
       </div>
-      {product.description && (
-        <p className="text-sm text-muted-foreground line-clamp-3">{product.description}</p>
-      )}
     </div>
   );
 }
