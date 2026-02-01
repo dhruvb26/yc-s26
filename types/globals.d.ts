@@ -7,3 +7,9 @@ declare global {
     }
   }
 }
+
+// ffmpeg-static provides the path to the bundled ffmpeg binary
+declare module "ffmpeg-static" {
+  const ffmpegPath: string;
+  export default ffmpegPath;
+}

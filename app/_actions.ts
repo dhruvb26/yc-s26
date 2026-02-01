@@ -1461,22 +1461,38 @@ async function uploadToMux(
   }
 }
 
-// Combine multiple video scenes with audio using ffmpeg
+// Combine multiple video scenes with audio using ffmpeg-static
 async function combineVideosWithAudio(
   videoUrls: string[],
   audioBase64: string
 ): Promise<{ success: true; outputFilePath: string; tempDir: string } | { success: false; error: string }> {
   const { execSync } = await import("node:child_process");
-  const { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } = await import("node:fs");
+  const { mkdtempSync, writeFileSync, rmSync, existsSync, chmodSync } = await import("node:fs");
   const { join } = await import("node:path");
   const { tmpdir } = await import("node:os");
+  
+  // Use bundled ffmpeg binary for Vercel compatibility
+  const ffmpegStatic = await import("ffmpeg-static");
+  const ffmpegPath = ffmpegStatic.default;
+  
+  if (!ffmpegPath) {
+    return { success: false, error: "FFmpeg binary not found" };
+  }
 
   let tempDir: string | null = null;
 
   try {
+    // Ensure ffmpeg is executable
+    try {
+      chmodSync(ffmpegPath, 0o755);
+    } catch {
+      // May fail on read-only systems, but binary might already be executable
+    }
+    
     // Create temp directory
     tempDir = mkdtempSync(join(tmpdir(), "video-combine-"));
     console.log("Created temp directory:", tempDir);
+    console.log("Using ffmpeg from:", ffmpegPath);
 
     // Download all videos in parallel
     console.log("Downloading", videoUrls.length, "video scenes...");
@@ -1503,7 +1519,7 @@ async function combineVideosWithAudio(
 
     // Concatenate videos (re-encode to ensure consistent codec)
     const concatenatedVideo = join(tempDir, "concatenated.mp4");
-    execSync(`ffmpeg -f concat -safe 0 -i "${concatFile}" -c:v libx264 -preset fast -crf 23 -an "${concatenatedVideo}"`, {
+    execSync(`"${ffmpegPath}" -f concat -safe 0 -i "${concatFile}" -c:v libx264 -preset fast -crf 23 -an "${concatenatedVideo}"`, {
       stdio: "pipe",
     });
     console.log("Concatenated videos");
@@ -1511,7 +1527,7 @@ async function combineVideosWithAudio(
     // Combine video with audio - ensure audio is properly encoded
     const outputFile = join(tempDir, "final.mp4");
     execSync(
-      `ffmpeg -i "${concatenatedVideo}" -i "${audioFile}" -c:v copy -c:a aac -b:a 192k -map 0:v:0 -map 1:a:0 -shortest "${outputFile}"`,
+      `"${ffmpegPath}" -i "${concatenatedVideo}" -i "${audioFile}" -c:v copy -c:a aac -b:a 192k -map 0:v:0 -map 1:a:0 -shortest "${outputFile}"`,
       { stdio: "pipe" }
     );
     console.log("Combined video with audio");
