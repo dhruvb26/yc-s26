@@ -85,6 +85,32 @@ export type CreativeOutput = {
   generatedAt: string;
 };
 
+// Ad Intelligence types
+export type AdIntelItem = {
+  screenshotUrl?: string;       // Full page screenshot if available
+  adCopy: string;               // Primary text/copy
+  headline: string;             // Ad headline
+  callToAction: string;         // CTA text
+  platform: "meta" | "tiktok" | "google" | "other";
+  competitorName: string;
+  isActive: boolean;
+  pageUrl: string;
+};
+
+export type AdPatterns = {
+  commonHooks: string[];        // Opening hooks/attention grabbers
+  emotionalTriggers: string[];  // Emotional appeals used
+  ctaPatterns: string[];        // Call-to-action patterns
+  messagingThemes: string[];    // Common themes in messaging
+};
+
+export type AdIntelligenceResult = {
+  ads: AdIntelItem[];
+  patterns: AdPatterns;
+  summary: string;
+  sources: string[];
+};
+
 // Initialize Firecrawl
 function getFirecrawl() {
   const apiKey = process.env.FIRECRAWL_API_KEY;
@@ -730,7 +756,7 @@ export async function scrapeProductUrl(
     const firecrawl = getFirecrawl();
 
     console.log("Scraping product page with Firecrawl...");
-    
+
     // Scrape product info with structured extraction
     const result = await firecrawl.scrape(url, {
       formats: [
@@ -863,6 +889,223 @@ export async function refreshProductResearch(
   }
 }
 
+// Schema for Ad Intelligence extraction
+const AdIntelSchema = z.object({
+  ads: z.array(
+    z.object({
+      adCopy: z.string().describe("The main ad copy/text"),
+      headline: z.string().describe("The ad headline"),
+      callToAction: z.string().describe("The call-to-action text (e.g., 'Shop Now', 'Learn More')"),
+      competitorName: z.string().describe("Name of the competitor running this ad"),
+      isActive: z.boolean().describe("Whether this ad appears to be currently running"),
+    })
+  ).describe("Competitor advertisements found"),
+  patterns: z.object({
+    commonHooks: z.array(z.string()).describe("Common opening hooks used to grab attention"),
+    emotionalTriggers: z.array(z.string()).describe("Emotional appeals and triggers used"),
+    ctaPatterns: z.array(z.string()).describe("Common call-to-action patterns"),
+    messagingThemes: z.array(z.string()).describe("Common themes in the messaging"),
+  }),
+  summary: z.string().describe("Brief summary of competitor ad strategies"),
+});
+
+// Scrape competitor ad intelligence using Firecrawl
+export async function scrapeCompetitorAdIntel(
+  productName: string,
+  brand?: string,
+  category?: string,
+  competitors?: string[]
+): Promise<AdIntelligenceResult> {
+  try {
+    const firecrawl = getFirecrawl();
+    const openai = getOpenAI();
+
+    console.log("🔍 Starting competitor ad intelligence for:", productName);
+
+    // Build search context
+    const productContext = [productName, brand, category].filter(Boolean).join(" ");
+    const competitorList = competitors?.slice(0, 5) || [];
+
+    // Search for competitor ads using Firecrawl
+    const searchQueries = [
+      `${productContext} advertisement marketing campaign`,
+      `${category || productName} brand ads creative examples`,
+      ...competitorList.map(c => `${c} ${category || "product"} advertisement`),
+    ];
+
+    const allContent: { url: string; content: string; title: string }[] = [];
+    const sources: string[] = [];
+
+    // Run searches in parallel
+    const searchPromises = searchQueries.slice(0, 4).map(async (query) => {
+      try {
+        const response = await firecrawl.search(query, {
+          limit: 5,
+        });
+
+        // Handle response - it comes back as { web: [...] } directly
+        type SearchItem = { url?: string; title?: string; description?: string; markdown?: string };
+        let items: SearchItem[] = [];
+        const anyResponse = response as Record<string, unknown>;
+
+        if ("web" in anyResponse && Array.isArray(anyResponse.web)) {
+          items = anyResponse.web as SearchItem[];
+        } else if ("data" in anyResponse) {
+          const data = anyResponse.data;
+          if (Array.isArray(data)) {
+            items = data as SearchItem[];
+          } else if (data && typeof data === "object" && "web" in (data as object)) {
+            items = (data as { web: SearchItem[] }).web;
+          }
+        }
+
+        for (const item of items) {
+          if (item.url) {
+            sources.push(item.url);
+            allContent.push({
+              url: item.url,
+              content: item.markdown?.slice(0, 2000) || item.description || "",
+              title: item.title || "",
+            });
+          }
+        }
+      } catch (error) {
+        console.error(`Search error for "${query}":`, error);
+      }
+    });
+
+    await Promise.all(searchPromises);
+
+    // Scrape Meta Ad Library if we have competitor names
+    if (competitorList.length > 0) {
+      try {
+        const adLibraryUrl = `https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=US&q=${encodeURIComponent(competitorList[0])}`;
+        
+        const adLibraryResult = await firecrawl.scrape(adLibraryUrl, {
+          formats: ["markdown"],
+          timeout: 20000,
+        });
+
+        if (adLibraryResult?.markdown) {
+          sources.push(adLibraryUrl);
+          allContent.push({
+            url: adLibraryUrl,
+            content: adLibraryResult.markdown.slice(0, 4000),
+            title: "Meta Ad Library",
+          });
+        }
+      } catch (error) {
+        console.error("Meta Ad Library scrape failed:", error);
+      }
+    }
+
+    console.log(`📊 Gathered ${allContent.length} content sources, analyzing...`);
+
+    // Use GPT to analyze and extract ad intelligence
+    const combinedContent = allContent
+      .map(c => `### ${c.title}\nURL: ${c.url}\n${c.content}`)
+      .join("\n\n---\n\n")
+      .slice(0, 15000);
+
+    // Original brand to exclude from results
+    const originalBrand = brand?.toLowerCase().trim() || "";
+    const productNameLower = productName.toLowerCase();
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4.1",
+      messages: [
+        {
+          role: "system",
+          content: `You are an advertising intelligence analyst. Analyze competitor ads and marketing content to extract actionable insights.
+
+Focus on:
+- Actual ad copy and headlines used by COMPETITORS ONLY
+- Common hooks and attention-grabbers
+- Emotional triggers and pain points addressed
+- Call-to-action patterns
+- Messaging themes and positioning
+
+IMPORTANT: Only include ads from COMPETITOR brands. Do NOT include ads from the original brand being researched.
+
+Return structured JSON with ads array, patterns object, and summary.`,
+        },
+        {
+          role: "user",
+          content: `Analyze competitor advertising for: "${productContext}"
+
+ORIGINAL BRAND (DO NOT INCLUDE ADS FROM THIS BRAND): ${brand || productName}
+
+Competitors to focus on: ${competitorList.join(", ") || "any relevant competitors"}
+
+Content to analyze:
+${combinedContent}
+
+Extract ad intelligence in this JSON format:
+{
+  "ads": [{ "adCopy": "", "headline": "", "callToAction": "", "competitorName": "", "isActive": true }],
+  "patterns": {
+    "commonHooks": ["hook1", "hook2"],
+    "emotionalTriggers": ["trigger1", "trigger2"],
+    "ctaPatterns": ["cta1", "cta2"],
+    "messagingThemes": ["theme1", "theme2"]
+  },
+  "summary": "Brief analysis of competitor ad strategies"
+}
+
+Remember: DO NOT include any ads from "${brand || productName}" - only competitor brands.`,
+        },
+      ],
+      max_tokens: 2000,
+      temperature: 0.3,
+    });
+
+    const content = response.choices[0]?.message?.content?.trim() || "{}";
+    const jsonStr = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+    
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonStr);
+    } catch {
+      console.error("Failed to parse ad intel JSON:", content);
+      parsed = { ads: [], patterns: { commonHooks: [], emotionalTriggers: [], ctaPatterns: [], messagingThemes: [] }, summary: "" };
+    }
+
+    // Transform ads to include platform and pageUrl, filtering out the original brand
+    const ads: AdIntelItem[] = (parsed.ads || [])
+      .filter((ad: { competitorName: string }) => {
+        const competitorNameLower = ad.competitorName?.toLowerCase().trim() || "";
+        // Filter out ads from the original brand
+        if (originalBrand && competitorNameLower.includes(originalBrand)) return false;
+        if (originalBrand && originalBrand.includes(competitorNameLower) && competitorNameLower.length > 2) return false;
+        if (competitorNameLower.includes(productNameLower) || productNameLower.includes(competitorNameLower)) return false;
+        return true;
+      })
+      .map((ad: { adCopy: string; headline: string; callToAction: string; competitorName: string; isActive: boolean }, i: number) => ({
+        ...ad,
+        platform: "meta" as const,
+        pageUrl: sources[i] || "",
+        screenshotUrl: undefined,
+      }));
+
+    console.log(`✅ Ad Intel complete: ${ads.length} competitor ads (filtered out original brand)`);
+
+    return {
+      ads,
+      patterns: parsed.patterns || { commonHooks: [], emotionalTriggers: [], ctaPatterns: [], messagingThemes: [] },
+      summary: parsed.summary || "",
+      sources: [...new Set(sources)],
+    };
+  } catch (error) {
+    console.error("Ad intelligence error:", error);
+    return {
+      ads: [],
+      patterns: { commonHooks: [], emotionalTriggers: [], ctaPatterns: [], messagingThemes: [] },
+      summary: "",
+      sources: [],
+    };
+  }
+}
+
 // Initialize OpenAI
 function getOpenAI() {
   const apiKey = process.env.OPENAI_API_KEY;
@@ -974,7 +1217,7 @@ export async function generateStoryboards(
   const painPoints = research.painPoints.map(p => p.issue);
   const competitors = research.competitors.map(c => c.productName || c.brand);
   const features = product.features || (product.description ? [product.description] : []);
-
+  
   // Generate clips with AI (now includes brand name for branding)
   console.log("Generating clips with GPT-4.1...");
   let clips = await generateClipsWithAI(productName, brandName, painPoints, competitors, features);
@@ -1046,7 +1289,7 @@ async function generateVoiceover(text: string): Promise<
   | { success: false; error: string }
 > {
   const apiKey = (process.env.ELEVEN_API_KEY || process.env.ELEVENLABS_API_KEY)?.trim();
-
+  
   if (!apiKey) {
     return { success: false, error: "ELEVEN_API_KEY not configured" };
   }

@@ -1,14 +1,16 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { ArrowRight, ArrowLeft, Users } from "lucide-react";
+import { ArrowRight, ArrowLeft, Users, Eye } from "lucide-react";
 import { toast } from "sonner";
 import {
   scrapeProductUrl,
   refreshProductResearch,
   generateStoryboards,
+  scrapeCompetitorAdIntel,
   type ScrapeResult,
   type CreativeOutput,
+  type AdIntelligenceResult,
 } from "@/app/_actions";
 import { UrlInput } from "./research/url-input";
 import { ResearchProgress } from "./research/research-progress";
@@ -16,21 +18,24 @@ import { ProductDetails } from "./research/product-details";
 import { ResearchResults } from "./research/research-results";
 import { StoryboardView } from "./research/storyboard-view";
 import { InfluencerOutreach } from "./research/influencer-outreach";
+import { AdIntelligenceView } from "./research/ad-intelligence-view";
 
 // Hardcoded URL for testing
 const DEFAULT_URL = "https://www.amazon.com/Mens-Cloud-Black-11-Medium/dp/B0D31TQ9LW";
 
-type Stage = "input" | "analyzing" | "results" | "creative" | "outreach";
+type Stage = "input" | "analyzing" | "results" | "creative" | "outreach" | "ad-intel";
 
 export function ProductScraper() {
   const [url, setUrl] = useState(DEFAULT_URL);
   const [stage, setStage] = useState<Stage>("input");
   const [result, setResult] = useState<ScrapeResult | null>(null);
   const [creative, setCreative] = useState<CreativeOutput | null>(null);
+  const [adIntel, setAdIntel] = useState<AdIntelligenceResult | null>(null);
   const [generatedMuxPlaybackId, setGeneratedMuxPlaybackId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [isRefreshing, startRefreshTransition] = useTransition();
   const [isGenerating, startGenerateTransition] = useTransition();
+  const [isLoadingAdIntel, startAdIntelTransition] = useTransition();
 
   const handleSubmit = (submittedUrl: string) => {
     setUrl(submittedUrl);
@@ -113,6 +118,35 @@ export function ProductScraper() {
     setStage("creative");
   };
 
+  const handleGenerateAdIntel = () => {
+    if (!result?.success) return;
+
+    const toastId = toast.loading("Analyzing competitor ads...");
+    
+    startAdIntelTransition(async () => {
+      try {
+        // Get competitor names from research
+        const competitors = result.research?.competitors?.map(c => c.brand).filter(Boolean) || [];
+        
+        const intel = await scrapeCompetitorAdIntel(
+          result.data.title || "",
+          result.data.brand,
+          result.data.category,
+          competitors
+        );
+        setAdIntel(intel);
+        setStage("ad-intel");
+        toast.success(`Found ${intel.ads.length} competitor ads`, { id: toastId });
+      } catch {
+        toast.error("Failed to analyze competitor ads", { id: toastId });
+      }
+    });
+  };
+
+  const handleBackFromAdIntel = () => {
+    setStage("results");
+  };
+
   // Callback to receive generated Mux playback ID from StoryboardView
   const handleMediaGenerated = (muxPlaybackId: string) => {
     setGeneratedMuxPlaybackId(muxPlaybackId);
@@ -148,6 +182,32 @@ export function ProductScraper() {
           videoUrl={generatedMuxPlaybackId ? `https://stream.mux.com/${generatedMuxPlaybackId}/high.mp4` : undefined}
           onBack={handleBackToCreative}
         />
+      </div>
+    );
+  }
+
+  // Stage 6: Ad Intelligence
+  if (stage === "ad-intel" && adIntel && result?.success) {
+    return (
+      <div className="h-full flex flex-col">
+        <div className="flex items-center justify-between gap-4 py-3 border-b">
+          <button
+            onClick={handleBackFromAdIntel}
+            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ArrowLeft className="size-3.5" />
+            Back to research
+          </button>
+          <div className="flex items-center gap-4">
+            <ProductMini product={result.data} />
+            <p className="text-sm text-muted-foreground">
+              {adIntel.ads.length} ads found
+            </p>
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto pt-6 pr-2">
+          <AdIntelligenceView data={adIntel} />
+        </div>
       </div>
     );
   }
@@ -200,6 +260,14 @@ export function ProductScraper() {
               className="text-sm text-muted-foreground hover:text-foreground transition-colors"
             >
               Change
+            </button>
+            <button
+              onClick={handleGenerateAdIntel}
+              disabled={isLoadingAdIntel}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-foreground text-background rounded-md hover:opacity-90 transition-opacity disabled:opacity-50"
+            >
+              <Eye className="size-3.5" />
+              {isLoadingAdIntel ? "Analyzing..." : "Spy on Ads"}
             </button>
             {result.research && (result.research.painPoints.length > 0 || result.research.competitors.length > 0) && (
               <button
