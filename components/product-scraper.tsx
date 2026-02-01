@@ -21,7 +21,7 @@ import { InfluencerOutreach } from "./research/influencer-outreach";
 import { AdIntelligenceView } from "./research/ad-intelligence-view";
 
 // Hardcoded URL for testing
-const DEFAULT_URL = "https://www.amazon.com/Mens-Cloud-Black-11-Medium/dp/B0D31TQ9LW";
+const DEFAULT_URL = "";
 
 type Stage = "input" | "analyzing" | "results" | "creative" | "outreach" | "ad-intel";
 
@@ -41,12 +41,27 @@ export function ProductScraper() {
     setUrl(submittedUrl);
     setStage("analyzing");
     
-    const toastId = toast.loading("Scraping product page with Firecrawl...");
+    const toastId = toast.loading("Connecting to Firecrawl...");
+    
+    // Progress toasts for visual feedback during long operation
+    const progressTimers = [
+      setTimeout(() => toast.loading("Scraping product page...", { id: toastId }), 1500),
+      setTimeout(() => toast.loading("Extracting product details...", { id: toastId }), 4000),
+      setTimeout(() => toast.loading("Parsing images and pricing...", { id: toastId }), 7000),
+      setTimeout(() => toast.loading("Starting market research...", { id: toastId }), 10000),
+      setTimeout(() => toast.loading("Searching for pain points...", { id: toastId }), 14000),
+      setTimeout(() => toast.loading("Analyzing competitor landscape...", { id: toastId }), 18000),
+      setTimeout(() => toast.loading("Finding customer reviews...", { id: toastId }), 22000),
+      setTimeout(() => toast.loading("Almost done...", { id: toastId }), 28000),
+    ];
     
     startTransition(async () => {
       try {
-        toast.loading("Running market research...", { id: toastId });
         const scraped = await scrapeProductUrl(submittedUrl, true);
+        
+        // Clear all pending progress timers
+        progressTimers.forEach(clearTimeout);
+        
         setResult(scraped);
         setStage("results");
         
@@ -57,6 +72,7 @@ export function ProductScraper() {
           toast.error(`Scrape failed: ${scraped.error}`, { id: toastId });
         }
       } catch (err) {
+        progressTimers.forEach(clearTimeout);
         toast.error("Failed to analyze product", { id: toastId });
         setStage("input");
       }
@@ -72,7 +88,14 @@ export function ProductScraper() {
   const handleRefresh = () => {
     if (!result?.success || !result.data.title) return;
 
-    const toastId = toast.loading("Refreshing market research...");
+    const toastId = toast.loading("Starting fresh research...");
+    
+    const progressTimers = [
+      setTimeout(() => toast.loading("Searching for customer pain points...", { id: toastId }), 2000),
+      setTimeout(() => toast.loading("Analyzing competitor products...", { id: toastId }), 6000),
+      setTimeout(() => toast.loading("Gathering review insights...", { id: toastId }), 10000),
+      setTimeout(() => toast.loading("Compiling research data...", { id: toastId }), 15000),
+    ];
     
     startRefreshTransition(async () => {
       try {
@@ -81,9 +104,11 @@ export function ProductScraper() {
           result.data.brand,
           result.data.category
         );
+        progressTimers.forEach(clearTimeout);
         setResult((prev) => (prev?.success ? { ...prev, research } : prev));
         toast.success(`Found ${research.painPoints.length} pain points, ${research.competitors.length} competitors`, { id: toastId });
       } catch {
+        progressTimers.forEach(clearTimeout);
         toast.error("Failed to refresh research", { id: toastId });
       }
     });
@@ -92,15 +117,24 @@ export function ProductScraper() {
   const handleGenerateCreative = () => {
     if (!result?.success || !result.research) return;
 
-    const toastId = toast.loading("Generating ad storyboard...");
+    const toastId = toast.loading("Preparing ad concepts...");
+    
+    const progressTimers = [
+      setTimeout(() => toast.loading("Analyzing pain points for messaging...", { id: toastId }), 1500),
+      setTimeout(() => toast.loading("Writing ad script...", { id: toastId }), 4000),
+      setTimeout(() => toast.loading("Generating scene descriptions...", { id: toastId }), 7000),
+      setTimeout(() => toast.loading("Finalizing storyboard...", { id: toastId }), 10000),
+    ];
     
     startGenerateTransition(async () => {
       try {
         const output = await generateStoryboards(result.data, result.research!);
+        progressTimers.forEach(clearTimeout);
         setCreative(output);
         setStage("creative");
         toast.success(`Generated ${output.clips.length} video scenes`, { id: toastId });
       } catch {
+        progressTimers.forEach(clearTimeout);
         toast.error("Failed to generate creative", { id: toastId });
       }
     });

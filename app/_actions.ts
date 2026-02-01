@@ -790,7 +790,7 @@ export async function scrapeProductUrl(
         },
       ],
     });
-    
+
     console.log("Firecrawl scrape complete");
 
     if (!result || !result.json) {
@@ -1114,7 +1114,7 @@ function getOpenAI() {
 }
 
 // Generate and validate video clips using GPT-4.1
-// Creates a cohesive 4-scene advertisement narrative: Hook → Problem → Solution → CTA
+// Creates a simple 4-scene ad: Intro → Problem → Solution → Close
 async function generateClipsWithAI(
   productName: string,
   brandName: string | undefined,
@@ -1128,7 +1128,7 @@ async function generateClipsWithAI(
     // Build branded product identifier for prompts
     // Avoid duplicating brand name if it's already in the product name
     const brandedProduct = brandName && !productName.toLowerCase().includes(brandName.toLowerCase())
-      ? `${brandName} ${productName}` 
+      ? `${brandName} ${productName}`
       : productName;
 
     const response = await openai.chat.completions.create({
@@ -1136,21 +1136,21 @@ async function generateClipsWithAI(
       messages: [
         {
           role: "system",
-          content: `You are a premium short-form video ad creator. Generate EXACTLY 4 video scenes that flow together as a cohesive advertisement narrative.
+          content: `You are a product ad script writer. Generate EXACTLY 4 simple video scenes for a short product ad.
 
-ADVERTISEMENT STRUCTURE (4 SCENES TOTAL):
-1. HOOK (Scene 1): Dramatic, attention-grabbing product reveal. Create intrigue and stop the scroll.
-2. PROBLEM (Scene 2): Subtly show the frustration or limitation the product solves. Build tension.
-3. SOLUTION (Scene 3): Showcase the product's key feature in action. The "aha" moment.
-4. CTA (Scene 4): Final glamour shot with brand prominence. Create desire and urgency.
+STRUCTURE (4 SCENES):
+1. INTRO: Clean product shot, establish what it is
+2. PROBLEM: Quick visual of the issue this solves
+3. SOLUTION: Show the product working/in use
+4. CLOSE: Product with brand, simple call to action
 
-CRITICAL RULES:
-- Generate EXACTLY 4 scenes that tell a complete story
-- Product-only B-roll footage - NO people, hands, or faces
-- Each scene must flow naturally into the next (visual and narrative continuity)
-- Use cinematic language: "macro shot", "dramatic lighting", "slow reveal", "floating product", "cinematic sweep"
-- The voiceover script must form one cohesive narrative when read in sequence
-- Keep each voiceover line punchy (8-12 words max) - they will be combined into one audio track
+RULES:
+- Generate EXACTLY 4 scenes
+- Product-only footage - NO people, hands, or faces
+- Keep visuals simple and clean, not overly stylized
+- Voiceover should be conversational and direct (6-10 words each)
+- No hype words like "revolutionary", "game-changing", "incredible"
+- Think informercial clarity, not Super Bowl flashiness
 
 PRODUCT: "${brandedProduct}"
 BRAND: "${brandName || productName}"
@@ -1161,20 +1161,20 @@ Output valid JSON array with exactly 4 clips, each having: label, prompt, voiceo
           role: "user",
           content: `Product: ${brandedProduct}
 
-PAIN POINTS TO ADDRESS:
-${painPoints.slice(0, 2).map(p => `- ${p}`).join("\n") || "- Frustration with inferior alternatives"}
+What it solves:
+${painPoints.slice(0, 2).map(p => `- ${p}`).join("\n") || "- Common frustrations with alternatives"}
 
-KEY FEATURES TO HIGHLIGHT:
-${features.slice(0, 2).map(f => `- ${f}`).join("\n") || "- Premium quality and performance"}
+Key benefits:
+${features.slice(0, 2).map(f => `- ${f}`).join("\n") || "- Quality and reliability"}
 
-Generate a 4-scene advertisement that tells a compelling story:
-- Scene 1 (Hook): Dramatic reveal that grabs attention
-- Scene 2 (Problem): Visual tension showing what life was like before  
-- Scene 3 (Solution): The product solving the problem beautifully
-- Scene 4 (CTA): Aspirational close with brand prominence
+Generate 4 simple ad scenes:
+- Scene 1: Show the product clearly
+- Scene 2: The problem people have
+- Scene 3: How this product helps
+- Scene 4: Brand shot with simple CTA
 
-The 4 voiceover lines MUST flow together as one script. Example flow:
-"What if silence was this beautiful?" → "No more compromises." → "Pure, immersive sound." → "${brandName || productName}. Hear everything."
+Voiceover example tone:
+"Tired of [problem]?" → "It doesn't have to be that way." → "[Product] just works." → "Try ${brandName || productName} today."
 
 Return ONLY the JSON array with exactly 4 clips:`
         }
@@ -1190,10 +1190,10 @@ Return ONLY the JSON array with exactly 4 clips:`
 
     // Ensure we have exactly 4 clips
     const finalClips = clips.slice(0, 4);
-    
+
     return finalClips.map((clip, index) => ({
       id: crypto.randomUUID(),
-      label: clip.label || ["Hook", "Problem", "Solution", "CTA"][index],
+      label: clip.label || ["Intro", "Problem", "Solution", "Close"][index],
       prompt: clip.prompt,
       voiceover: clip.voiceover,
     }));
@@ -1227,36 +1227,36 @@ export async function generateStoryboards(
     const shortName = product.brand || productName.split(" ")[0];
     // Avoid duplicating brand name if it's already in the product name
     const brandedProduct = brandName && !productName.toLowerCase().includes(brandName.toLowerCase())
-      ? `${brandName} ${productName}` 
+      ? `${brandName} ${productName}`
       : productName;
     const mainFeature = features[0] || "premium quality";
     const painPoint = painPoints[0] || "settling for less";
 
-    // 4-scene narrative: Hook → Problem → Solution → CTA
+    // 4-scene narrative: Intro → Problem → Solution → Close
     clips = [
       {
         id: crypto.randomUUID(),
-        label: "Hook",
-        prompt: `Dramatic slow reveal of ${brandedProduct} emerging from darkness into spotlight, cinematic lighting, particles floating, mysterious atmosphere, premium product photography`,
-        voiceover: `What if everything changed?`,
+        label: "Intro",
+        prompt: `Clean product shot of ${brandedProduct} on plain white background, simple studio lighting, centered composition, product photography`,
+        voiceover: `Meet ${shortName}.`,
       },
       {
         id: crypto.randomUUID(),
         label: "Problem",
-        prompt: `Split screen effect: dim, desaturated generic products on one side fading away, ${brandedProduct} glowing on the other side, visual contrast, tension building`,
-        voiceover: `No more ${painPoint.slice(0, 25).toLowerCase()}.`,
+        prompt: `${brandedProduct} next to generic alternatives, simple comparison setup, neutral lighting, clean background`,
+        voiceover: `Tired of ${painPoint.slice(0, 20).toLowerCase()}?`,
       },
       {
         id: crypto.randomUUID(),
         label: "Solution",
-        prompt: `${brandedProduct} in action, extreme macro detail shot highlighting ${mainFeature.slice(0, 30)}, golden hour lighting, shallow depth of field, premium feel`,
-        voiceover: `Experience ${mainFeature.slice(0, 20)}. Perfected.`,
+        prompt: `${brandedProduct} in use, close-up showing ${mainFeature.slice(0, 25)}, natural lighting, simple background`,
+        voiceover: `${shortName} delivers ${mainFeature.slice(0, 15)}.`,
       },
       {
         id: crypto.randomUUID(),
-        label: "CTA",
-        prompt: `${brandedProduct} hero shot with ${shortName} logo prominently visible, floating on gradient background, lens flare, aspirational mood, call to action energy`,
-        voiceover: `${shortName}. This is it.`,
+        label: "Close",
+        prompt: `${brandedProduct} with ${shortName} branding visible, clean product shot, white or neutral background, simple and direct`,
+        voiceover: `Try ${shortName} today.`,
       },
     ];
   }
@@ -1274,13 +1274,13 @@ export async function generateStoryboards(
 
 // Video + voiceover generation result type
 export type ClipGenerationResult =
-  | { 
-      success: true; 
-      muxPlaybackId: string;  // Mux playback ID for the video player
-      muxAssetId: string;     // Mux asset ID for management
-      sceneCount: number;
-      audioDuration: number;  // Duration in seconds
-    }
+  | {
+    success: true;
+    muxPlaybackId: string;  // Mux playback ID for the video player
+    muxAssetId: string;     // Mux asset ID for management
+    sceneCount: number;
+    audioDuration: number;  // Duration in seconds
+  }
   | { success: false; error: string };
 
 // Generate voiceover audio using ElevenLabs REST API
@@ -1385,13 +1385,13 @@ async function uploadToMux(
 ): Promise<{ success: true; playbackId: string; assetId: string } | { success: false; error: string }> {
   try {
     const mux = getMuxClient();
-    
+
     console.log("Uploading video to Mux...");
-    
+
     // Read the video file
     const { readFileSync } = await import("node:fs");
     const videoBuffer = readFileSync(videoFilePath);
-    
+
     // Create a direct upload URL
     const upload = await mux.video.uploads.create({
       cors_origin: "*",
@@ -1423,12 +1423,12 @@ async function uploadToMux(
 
     while (attempts < maxAttempts) {
       await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
-      
+
       const uploadStatus = await mux.video.uploads.retrieve(upload.id);
-      
+
       if (uploadStatus.asset_id) {
         asset = await mux.video.assets.retrieve(uploadStatus.asset_id);
-        
+
         if (asset.status === "ready") {
           console.log("Mux asset ready!");
           break;
@@ -1436,7 +1436,7 @@ async function uploadToMux(
           throw new Error("Mux asset processing failed");
         }
       }
-      
+
       attempts++;
       console.log(`Waiting for Mux processing... (attempt ${attempts}/${maxAttempts})`);
     }
@@ -1558,13 +1558,13 @@ export async function generateClipMedia(
   // If we have all clips, generate a multi-scene ad
   if (allClips && allClips.length >= 4) {
     console.log("Generating multi-scene advertisement with", allClips.length, "clips");
-    
+
     // Take first 4 clips for the scenes (Hook → Problem → Solution → CTA)
     const scenesToGenerate = allClips.slice(0, 4);
-    
+
     // Combine all voiceovers into one cohesive script
     const combinedVoiceover = scenesToGenerate.map(c => c.voiceover).join(" ");
-    
+
     // Generate all 4 video scenes in parallel + voiceover
     console.log("Generating 4 scenes in parallel + voiceover...");
     const [scene1, scene2, scene3, scene4, audioResult] = await Promise.all([
@@ -1578,7 +1578,7 @@ export async function generateClipMedia(
     // Check for failures
     const sceneResults = [scene1, scene2, scene3, scene4];
     const failedScenes = sceneResults.filter(s => !s.success);
-    
+
     if (failedScenes.length > 0) {
       const errors = failedScenes.map(s => `Scene ${s.sceneIndex + 1}: ${(s as { error: string }).error}`);
       return { success: false, error: `Video generation failed: ${errors.join(", ")}` };
@@ -1605,7 +1605,7 @@ export async function generateClipMedia(
     // Upload to Mux for professional video hosting
     console.log("Uploading combined video to Mux...");
     const muxResult = await uploadToMux(combineResult.outputFilePath);
-    
+
     // Cleanup temp files after upload
     await cleanupTempDir(combineResult.tempDir);
 
@@ -1639,7 +1639,7 @@ export async function generateClipMedia(
 
   // Combine single video with audio
   const combineResult = await combineVideosWithAudio([videoResult.videoUrl], audioResult.audioBase64);
-  
+
   if (!combineResult.success) {
     return { success: false, error: `Combine: ${combineResult.error}` };
   }

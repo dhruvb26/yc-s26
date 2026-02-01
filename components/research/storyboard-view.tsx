@@ -28,28 +28,45 @@ export function StoryboardView({ clips, onMediaGenerated }: StoryboardViewProps)
   const handleGenerateFullAd = () => {
     setError(null);
     
-    const toastId = toast.loading("Starting video generation...");
+    const toastId = toast.loading("Initializing video pipeline...");
+    
+    // Video generation takes 60-120+ seconds, so we space out the progress toasts
+    const progressTimers = [
+      setTimeout(() => toast.loading("Generating voiceover audio...", { id: toastId }), 3000),
+      setTimeout(() => toast.loading("Starting Scene 1 generation...", { id: toastId }), 8000),
+      setTimeout(() => toast.loading("Rendering Scene 2...", { id: toastId }), 15000),
+      setTimeout(() => toast.loading("Rendering Scene 3...", { id: toastId }), 25000),
+      setTimeout(() => toast.loading("Rendering Scene 4...", { id: toastId }), 35000),
+      setTimeout(() => toast.loading("Combining video scenes...", { id: toastId }), 50000),
+      setTimeout(() => toast.loading("Adding voiceover to video...", { id: toastId }), 65000),
+      setTimeout(() => toast.loading("Encoding final video...", { id: toastId }), 80000),
+      setTimeout(() => toast.loading("Uploading to Mux...", { id: toastId }), 95000),
+      setTimeout(() => toast.loading("Processing stream... almost ready", { id: toastId }), 110000),
+      setTimeout(() => toast.loading("Finalizing... hang tight", { id: toastId }), 130000),
+    ];
     
     startTransition(async () => {
       try {
-        toast.loading("Generating 4 video scenes in parallel...", { id: toastId });
-        
         const result = await generateClipMedia(
           clips[0].prompt,
           clips[0].voiceover,
           clips
         );
         
+        // Clear all pending progress timers
+        progressTimers.forEach(clearTimeout);
+        
         if (result.success) {
           setMuxPlaybackId(result.muxPlaybackId);
           setSceneCount(result.sceneCount);
-          toast.success("Video generated and uploaded to Mux!", { id: toastId });
+          toast.success("Video ready! 4 scenes combined with voiceover", { id: toastId });
           onMediaGenerated?.(result.muxPlaybackId);
         } else {
           setError(result.error);
           toast.error(`Generation failed: ${result.error}`, { id: toastId });
         }
       } catch (err) {
+        progressTimers.forEach(clearTimeout);
         const message = err instanceof Error ? err.message : "Unknown error occurred";
         setError(message);
         toast.error(`Error: ${message}`, { id: toastId });
@@ -134,7 +151,7 @@ export function StoryboardView({ clips, onMediaGenerated }: StoryboardViewProps)
               key={clip.id} 
               clip={clip} 
               index={index + 1}
-              sceneType={["Hook", "Problem", "Solution", "CTA"][index]}
+              sceneType={["Intro", "Problem", "Solution", "Close"][index]}
             />
           ))}
         </div>
