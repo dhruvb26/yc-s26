@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from '@clerk/nextjs'
 import { Geist, Geist_Mono } from "next/font/google";
+import { Toaster } from "sonner";
 import { Navbar } from "@/components/navbar";
 import "@/app/styles/globals.css";
 
@@ -30,6 +31,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
+        <Toaster position="bottom-right" richColors />
         <Navbar />
         {children}
       </body>

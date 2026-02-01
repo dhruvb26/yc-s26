@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { ArrowRight, ArrowLeft, Users } from "lucide-react";
+import { toast } from "sonner";
 import {
   scrapeProductUrl,
   refreshProductResearch,
@@ -26,8 +27,7 @@ export function ProductScraper() {
   const [stage, setStage] = useState<Stage>("input");
   const [result, setResult] = useState<ScrapeResult | null>(null);
   const [creative, setCreative] = useState<CreativeOutput | null>(null);
-  const [generatedVideoUrl, setGeneratedVideoUrl] = useState<string | null>(null);
-  const [generatedAudioUrl, setGeneratedAudioUrl] = useState<string | null>(null);
+  const [generatedMuxPlaybackId, setGeneratedMuxPlaybackId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [isRefreshing, startRefreshTransition] = useTransition();
   const [isGenerating, startGenerateTransition] = useTransition();
@@ -36,10 +36,25 @@ export function ProductScraper() {
     setUrl(submittedUrl);
     setStage("analyzing");
     
+    const toastId = toast.loading("Scraping product page with Firecrawl...");
+    
     startTransition(async () => {
-      const scraped = await scrapeProductUrl(submittedUrl, true);
-      setResult(scraped);
-      setStage("results");
+      try {
+        toast.loading("Running market research...", { id: toastId });
+        const scraped = await scrapeProductUrl(submittedUrl, true);
+        setResult(scraped);
+        setStage("results");
+        
+        if (scraped.success) {
+          const imageCount = (scraped.data.imageUrls?.length || 0) + (scraped.data.imageUrl ? 1 : 0);
+          toast.success(`Found ${imageCount} images, ${scraped.research?.painPoints.length || 0} pain points`, { id: toastId });
+        } else {
+          toast.error(`Scrape failed: ${scraped.error}`, { id: toastId });
+        }
+      } catch (err) {
+        toast.error("Failed to analyze product", { id: toastId });
+        setStage("input");
+      }
     });
   };
 
@@ -52,23 +67,37 @@ export function ProductScraper() {
   const handleRefresh = () => {
     if (!result?.success || !result.data.title) return;
 
+    const toastId = toast.loading("Refreshing market research...");
+    
     startRefreshTransition(async () => {
-      const research = await refreshProductResearch(
-        result.data.title!,
-        result.data.brand,
-        result.data.category
-      );
-      setResult((prev) => (prev?.success ? { ...prev, research } : prev));
+      try {
+        const research = await refreshProductResearch(
+          result.data.title!,
+          result.data.brand,
+          result.data.category
+        );
+        setResult((prev) => (prev?.success ? { ...prev, research } : prev));
+        toast.success(`Found ${research.painPoints.length} pain points, ${research.competitors.length} competitors`, { id: toastId });
+      } catch {
+        toast.error("Failed to refresh research", { id: toastId });
+      }
     });
   };
 
   const handleGenerateCreative = () => {
     if (!result?.success || !result.research) return;
 
+    const toastId = toast.loading("Generating ad storyboard...");
+    
     startGenerateTransition(async () => {
-      const output = await generateStoryboards(result.data, result.research!);
-      setCreative(output);
-      setStage("creative");
+      try {
+        const output = await generateStoryboards(result.data, result.research!);
+        setCreative(output);
+        setStage("creative");
+        toast.success(`Generated ${output.clips.length} video scenes`, { id: toastId });
+      } catch {
+        toast.error("Failed to generate creative", { id: toastId });
+      }
     });
   };
 
@@ -84,10 +113,9 @@ export function ProductScraper() {
     setStage("creative");
   };
 
-  // Callback to receive generated video and audio URLs from StoryboardView
-  const handleMediaGenerated = (videoUrl: string, audioUrl: string) => {
-    setGeneratedVideoUrl(videoUrl);
-    setGeneratedAudioUrl(audioUrl);
+  // Callback to receive generated Mux playback ID from StoryboardView
+  const handleMediaGenerated = (muxPlaybackId: string) => {
+    setGeneratedMuxPlaybackId(muxPlaybackId);
   };
 
   // Stage 1: URL Input
@@ -117,8 +145,7 @@ export function ProductScraper() {
       <div className="h-full">
         <InfluencerOutreach
           product={result.data}
-          videoUrl={generatedVideoUrl || undefined}
-          audioUrl={generatedAudioUrl || undefined}
+          videoUrl={generatedMuxPlaybackId ? `https://stream.mux.com/${generatedMuxPlaybackId}/high.mp4` : undefined}
           onBack={handleBackToCreative}
         />
       </div>

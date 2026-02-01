@@ -35,12 +35,11 @@ import {
 
 interface InfluencerOutreachProps {
   product: ProductInfo;
-  videoUrl?: string;
-  audioUrl?: string; // ElevenLabs voiceover audio URL
+  videoUrl?: string; // Mux video MP4 URL
   onBack: () => void;
 }
 
-export function InfluencerOutreach({ product, videoUrl, audioUrl, onBack }: InfluencerOutreachProps) {
+export function InfluencerOutreach({ product, videoUrl, onBack }: InfluencerOutreachProps) {
   const [influencers, setInfluencers] = useState<Influencer[]>([]);
   const [emailDrafts, setEmailDrafts] = useState<EmailDraft[]>([]);
   const [selectedInfluencer, setSelectedInfluencer] = useState<Influencer | null>(null);
@@ -184,7 +183,6 @@ export function InfluencerOutreach({ product, videoUrl, audioUrl, onBack }: Infl
                   influencer={selectedInfluencer}
                   onSend={handleSendEmail}
                   videoUrl={videoUrl}
-                  audioUrl={audioUrl}
                 />
               ) : (
                 <div className="flex items-center justify-center py-12 text-muted-foreground">
@@ -505,19 +503,16 @@ function EmailDraftView({
   influencer,
   onSend,
   videoUrl,
-  audioUrl,
 }: {
   draft?: EmailDraft;
   influencer: Influencer;
   onSend: (draft: EmailDraft) => void;
   videoUrl?: string;
-  audioUrl?: string;
 }) {
   const [isSending, setIsSending] = useState(false);
   const [copied, setCopied] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const videoRef = React.useRef<HTMLVideoElement>(null);
-  const audioRef = React.useRef<HTMLAudioElement>(null);
 
   const handleSend = async () => {
     if (!draft || !influencer.email) return;
@@ -539,15 +534,9 @@ function EmailDraftView({
 
     if (isPlaying) {
       videoRef.current.pause();
-      audioRef.current?.pause();
       setIsPlaying(false);
     } else {
-      // Sync video to audio time before playing
-      if (audioRef.current) {
-        videoRef.current.currentTime = audioRef.current.currentTime;
-      }
       videoRef.current.play();
-      audioRef.current?.play();
       setIsPlaying(true);
     }
   };
@@ -555,7 +544,6 @@ function EmailDraftView({
   const handleMediaEnd = () => {
     setIsPlaying(false);
     if (videoRef.current) videoRef.current.currentTime = 0;
-    if (audioRef.current) audioRef.current.currentTime = 0;
   };
 
   // Platform-specific DM URLs
@@ -649,17 +637,8 @@ function EmailDraftView({
                 src={videoUrl}
                 className="w-full h-full object-contain"
                 playsInline
-                muted // Video is muted, audio comes from ElevenLabs
-                loop
                 onEnded={handleMediaEnd}
               />
-              {audioUrl && (
-                <audio 
-                  ref={audioRef} 
-                  src={audioUrl} 
-                  onEnded={handleMediaEnd}
-                />
-              )}
               
               {/* Play/Pause Button Overlay */}
               <button

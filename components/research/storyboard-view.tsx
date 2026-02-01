@@ -1,15 +1,22 @@
 "use client";
 
-import { useState, useTransition, useRef, useEffect } from "react";
-import { Copy, Check, MessageSquare, Video, Play, Loader2, Pause, Sparkles } from "lucide-react";
-import { type VideoClip, type WordTiming, generateClipMedia } from "@/app/_actions";
+import { useState, useTransition } from "react";
+import { Copy, Check, Video, Play, Loader2, Film, Download } from "lucide-react";
+import { toast } from "sonner";
+import MuxPlayer from "@mux/mux-player-react";
+import { type VideoClip, generateClipMedia } from "@/app/_actions";
 
 interface StoryboardViewProps {
   clips: VideoClip[];
-  onMediaGenerated?: (videoUrl: string, audioUrl: string) => void;
+  onMediaGenerated?: (muxPlaybackId: string) => void;
 }
 
 export function StoryboardView({ clips, onMediaGenerated }: StoryboardViewProps) {
+  const [muxPlaybackId, setMuxPlaybackId] = useState<string | null>(null);
+  const [sceneCount, setSceneCount] = useState<number>(0);
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
   if (clips.length === 0) {
     return (
       <div className="py-8 text-center text-muted-foreground">
@@ -18,247 +25,79 @@ export function StoryboardView({ clips, onMediaGenerated }: StoryboardViewProps)
     );
   }
 
-  return (
-    <div className="space-y-4">
-      {clips.map((clip, index) => (
-        <ClipCard 
-          key={clip.id} 
-          clip={clip} 
-          index={index + 1} 
-          onMediaGenerated={onMediaGenerated}
-        />
-      ))}
-    </div>
-  );
-}
-
-function ClipCard({ clip, index, onMediaGenerated }: { 
-  clip: VideoClip; 
-  index: number;
-  onMediaGenerated?: (videoUrl: string, audioUrl: string) => void;
-}) {
-  const [copiedField, setCopiedField] = useState<"prompt" | "voiceover" | null>(null);
-  const [videoUrl, setVideoUrl] = useState<string | null>(null);
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [wordTimings, setWordTimings] = useState<WordTiming[]>([]);
-  const [currentSubtitle, setCurrentSubtitle] = useState<string>("");
-  const [error, setError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
-  const [isPlaying, setIsPlaying] = useState(false);
-
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const audioRef = useRef<HTMLAudioElement>(null);
-
-  const handleCopy = async (text: string, field: "prompt" | "voiceover") => {
-    await navigator.clipboard.writeText(text);
-    setCopiedField(field);
-    setTimeout(() => setCopiedField(null), 2000);
-  };
-
-  const handleGenerateVideo = () => {
+  const handleGenerateFullAd = () => {
     setError(null);
+    
+    const toastId = toast.loading("Starting video generation...");
+    
     startTransition(async () => {
-      const result = await generateClipMedia(clip.prompt, clip.voiceover);
-      if (result.success) {
-        setVideoUrl(result.videoUrl);
-        setAudioUrl(result.audioUrl);
-        setWordTimings(result.wordTimings);
-        // Notify parent of generated video and audio URLs
-        onMediaGenerated?.(result.videoUrl, result.audioUrl);
-      } else {
-        setError(result.error);
+      try {
+        toast.loading("Generating 4 video scenes in parallel...", { id: toastId });
+        
+        const result = await generateClipMedia(
+          clips[0].prompt,
+          clips[0].voiceover,
+          clips
+        );
+        
+        if (result.success) {
+          setMuxPlaybackId(result.muxPlaybackId);
+          setSceneCount(result.sceneCount);
+          toast.success("Video generated and uploaded to Mux!", { id: toastId });
+          onMediaGenerated?.(result.muxPlaybackId);
+        } else {
+          setError(result.error);
+          toast.error(`Generation failed: ${result.error}`, { id: toastId });
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error occurred";
+        setError(message);
+        toast.error(`Error: ${message}`, { id: toastId });
       }
     });
   };
 
-  // Update subtitles based on audio time using interval
-  useEffect(() => {
-    if (!isPlaying || wordTimings.length === 0) {
-      return;
-    }
-
-    const updateSubtitle = () => {
-      if (!audioRef.current) return;
-      
-      const currentTime = audioRef.current.currentTime;
-      
-      // Find words that are currently being spoken (show a few words at a time for readability)
-      const activeWords: string[] = [];
-      const windowSize = 0.5; // Show words within a 0.5s window
-      
-      for (const timing of wordTimings) {
-        // Show word if it's currently being spoken or about to be spoken
-        if (currentTime >= timing.start - 0.1 && currentTime <= timing.end + windowSize) {
-          activeWords.push(timing.word);
-        }
-        // Limit to ~5-6 words for readability
-        if (activeWords.length >= 6) break;
-      }
-      
-      setCurrentSubtitle(activeWords.join(" "));
-    };
-
-    // Update subtitles at 60fps for smooth display
-    const intervalId = setInterval(updateSubtitle, 16);
+  const handleDownload = async () => {
+    if (!muxPlaybackId) return;
     
-    return () => {
-      clearInterval(intervalId);
-      // Clear subtitle when stopping
-      setCurrentSubtitle("");
-    };
-  }, [isPlaying, wordTimings]);
-
-  const handlePlayPause = () => {
-    if (!videoRef.current || !audioRef.current) return;
-
-    if (isPlaying) {
-      videoRef.current.pause();
-      audioRef.current.pause();
-      setIsPlaying(false);
-    } else {
-      // Sync video to audio time before playing
-      videoRef.current.currentTime = audioRef.current.currentTime;
-      videoRef.current.play();
-      audioRef.current.play();
-      setIsPlaying(true);
+    const downloadUrl = `https://stream.mux.com/${muxPlaybackId}/high.mp4`;
+    
+    toast.loading("Preparing download...");
+    
+    try {
+      // Open in new tab for download
+      window.open(downloadUrl, "_blank");
+      toast.success("Download started!");
+    } catch {
+      toast.error("Download failed. Try right-clicking the video.");
     }
   };
 
-  // Handle audio end (audio is the source of truth for timing)
-  const handleAudioEnd = () => {
-    setIsPlaying(false);
-    setCurrentSubtitle("");
-    if (videoRef.current) videoRef.current.currentTime = 0;
-    if (audioRef.current) audioRef.current.currentTime = 0;
-  };
-
-  // If video is generated, show the expanded 50/50 split layout
-  if (videoUrl) {
-    return (
-      <div className="rounded-xl border bg-background overflow-hidden shadow-sm">
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/20">
-          <div className="flex items-center gap-2">
-            <span className="flex items-center justify-center size-6 rounded-full bg-foreground text-background text-xs font-semibold">
-              {index}
-            </span>
-            <span className="font-medium">{clip.label}</span>
-          </div>
-        </div>
-
-        {/* 50/50 Split Content */}
-        <div className="grid grid-cols-2 min-h-[280px]">
-          {/* Left: Video with Subtitles */}
-          <div className="relative bg-black flex items-center justify-center">
-            <video
-              ref={videoRef}
-              src={videoUrl}
-              className="w-full h-full object-contain max-h-[320px]"
-              playsInline
-              muted // Video is muted, audio comes from ElevenLabs
-              loop // Loop video in case audio is longer
-            />
-            {audioUrl && (
-              <audio 
-                ref={audioRef} 
-                src={audioUrl} 
-                onEnded={handleAudioEnd}
-              />
-            )}
-            
-            {/* Subtitle Overlay */}
-            {currentSubtitle && (
-              <div className="absolute bottom-8 left-4 right-4 flex justify-center pointer-events-none">
-                <div className="bg-black/80 text-white px-4 py-2 rounded-lg max-w-[90%]">
-                  <p className="text-center text-sm font-medium leading-relaxed">
-                    {currentSubtitle}
-                  </p>
-                </div>
-              </div>
-            )}
-            
-            {/* Play/Pause Button */}
-            <button
-              onClick={handlePlayPause}
-              className="absolute inset-0 flex items-center justify-center bg-black/20 hover:bg-black/30 transition-colors group"
-            >
-              <div className="size-14 rounded-full bg-white/90 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                {isPlaying ? (
-                  <Pause className="size-6 text-black" />
-                ) : (
-                  <Play className="size-6 text-black ml-1" />
-                )}
-              </div>
-            </button>
-          </div>
-
-          {/* Right: Voiceover + Prompt */}
-          <div className="flex flex-col">
-            {/* Voiceover */}
-            <div className="flex-1 p-5 border-b">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <div className="size-7 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
-                    <MessageSquare className="size-4 text-blue-600 dark:text-blue-400" />
-                  </div>
-                  <span className="text-sm font-medium">Voiceover</span>
-                </div>
-                <CopyButton
-                  text={clip.voiceover}
-                  field="voiceover"
-                  copiedField={copiedField}
-                  onCopy={handleCopy}
-                />
-              </div>
-              <p className="text-sm leading-relaxed">{clip.voiceover}</p>
-            </div>
-
-            {/* Prompt */}
-            <div className="flex-1 p-5 bg-muted/10">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <div className="size-7 rounded-lg bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
-                    <Sparkles className="size-4 text-purple-600 dark:text-purple-400" />
-                  </div>
-                  <span className="text-sm font-medium">Video Prompt</span>
-                </div>
-                <CopyButton
-                  text={clip.prompt}
-                  field="prompt"
-                  copiedField={copiedField}
-                  onCopy={handleCopy}
-                />
-              </div>
-              <p className="text-sm text-muted-foreground leading-relaxed">{clip.prompt}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Compact card when video not yet generated
   return (
-    <div className="rounded-xl border bg-background overflow-hidden">
-      <div className="flex items-stretch">
-        {/* Left: Generate Video Section */}
-        <div className="w-48 shrink-0 p-5 bg-muted/20 border-r flex flex-col items-center justify-center gap-4">
-          <div className="size-16 rounded-xl bg-muted flex items-center justify-center">
-            <Video className="size-7 text-muted-foreground" />
-          </div>
-          
-          <div className="text-center">
-            <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-background border text-xs font-medium mb-3">
-              <span className="size-4 rounded-full bg-foreground text-background text-[10px] flex items-center justify-center">
-                {index}
-              </span>
-              {clip.label}
+    <div className="space-y-6">
+      {/* Video Player or Generate Button */}
+      {muxPlaybackId ? (
+        <FullAdPlayer
+          muxPlaybackId={muxPlaybackId}
+          sceneCount={sceneCount}
+          onDownload={handleDownload}
+        />
+      ) : (
+        <div className="rounded-xl border bg-muted/30 p-8">
+          <div className="flex flex-col items-center justify-center text-center space-y-4">
+            <div className="size-16 rounded-xl bg-muted flex items-center justify-center">
+              <Film className="size-8 text-muted-foreground" />
             </div>
-            
+            <div>
+              <h3 className="text-base font-medium mb-1">Generate Advertisement</h3>
+              <p className="text-sm text-muted-foreground">
+                4 scenes × 4 seconds = 16 second video
+              </p>
+            </div>
             <button
-              onClick={handleGenerateVideo}
-              disabled={isPending}
-              className="flex items-center justify-center gap-2 w-full px-4 py-2.5 text-sm font-medium bg-foreground text-background rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50"
+              onClick={handleGenerateFullAd}
+              disabled={isPending || clips.length < 4}
+              className="flex items-center gap-2 px-5 py-2.5 text-sm font-medium bg-foreground text-background rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50"
             >
               {isPending ? (
                 <>
@@ -268,53 +107,147 @@ function ClipCard({ clip, index, onMediaGenerated }: {
               ) : (
                 <>
                   <Play className="size-4" />
-                  Generate
+                  Generate Video
                 </>
               )}
             </button>
-            
             {error && (
-              <p className="text-xs text-destructive mt-2">{error}</p>
+              <p className="text-sm text-destructive">{error}</p>
+            )}
+            {clips.length < 4 && (
+              <p className="text-xs text-muted-foreground">
+                Need at least 4 clips
+              </p>
             )}
           </div>
         </div>
+      )}
 
-        {/* Right: Content Preview */}
-        <div className="flex-1 p-5 space-y-4">
-          {/* Voiceover */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <MessageSquare className="size-4 text-muted-foreground" />
-                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Voiceover</span>
-              </div>
-              <CopyButton
-                text={clip.voiceover}
-                field="voiceover"
-                copiedField={copiedField}
-                onCopy={handleCopy}
-              />
-            </div>
-            <p className="text-sm">{clip.voiceover}</p>
-          </div>
-
-          {/* Prompt */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <Sparkles className="size-4 text-muted-foreground" />
-                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Video Prompt</span>
-              </div>
-              <CopyButton
-                text={clip.prompt}
-                field="prompt"
-                copiedField={copiedField}
-                onCopy={handleCopy}
-              />
-            </div>
-            <p className="text-sm text-muted-foreground">{clip.prompt}</p>
-          </div>
+      {/* Scene Breakdown */}
+      <div>
+        <h4 className="text-sm font-medium text-muted-foreground mb-3">
+          Scenes
+        </h4>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {clips.slice(0, 4).map((clip, index) => (
+            <SceneCard 
+              key={clip.id} 
+              clip={clip} 
+              index={index + 1}
+              sceneType={["Hook", "Problem", "Solution", "CTA"][index]}
+            />
+          ))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function FullAdPlayer({
+  muxPlaybackId,
+  sceneCount,
+  onDownload,
+}: {
+  muxPlaybackId: string;
+  sceneCount: number;
+  onDownload: () => void;
+}) {
+  return (
+    <div className="rounded-xl border bg-background overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-3 border-b">
+        <div className="flex items-center gap-2">
+          <Film className="size-4 text-muted-foreground" />
+          <span className="text-sm font-medium">Advertisement</span>
+          <span className="text-xs text-muted-foreground">• {sceneCount} scenes</span>
+        </div>
+        <button
+          onClick={onDownload}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium border rounded-md hover:bg-muted transition-colors"
+        >
+          <Download className="size-4" />
+          Download
+        </button>
+      </div>
+
+      <div className="bg-black aspect-video">
+        <MuxPlayer
+          playbackId={muxPlaybackId}
+          streamType="on-demand"
+          autoPlay={false}
+          muted={false}
+          style={{
+            width: "100%",
+            height: "100%",
+            aspectRatio: "16/9",
+          }}
+          accentColor="#525252"
+          primaryColor="#ffffff"
+          secondaryColor="#171717"
+        />
+      </div>
+
+      <div className="px-4 py-2 border-t text-xs text-muted-foreground flex items-center justify-between">
+        <span>stream.mux.com/{muxPlaybackId}.m3u8</span>
+        <span>MP4: stream.mux.com/{muxPlaybackId}/high.mp4</span>
+      </div>
+    </div>
+  );
+}
+
+function SceneCard({ 
+  clip, 
+  index,
+  sceneType 
+}: { 
+  clip: VideoClip; 
+  index: number;
+  sceneType: string;
+}) {
+  const [copiedField, setCopiedField] = useState<"prompt" | "voiceover" | null>(null);
+
+  const handleCopy = async (text: string, field: "prompt" | "voiceover") => {
+    await navigator.clipboard.writeText(text);
+    setCopiedField(field);
+    toast.success("Copied to clipboard");
+    setTimeout(() => setCopiedField(null), 2000);
+  };
+
+  return (
+    <div className="rounded-lg border bg-background p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <span className="flex items-center justify-center size-6 rounded bg-muted text-xs font-medium">
+          {index}
+        </span>
+        <span className="text-sm font-medium">{sceneType}</span>
+        <span className="text-xs text-muted-foreground">• {clip.label}</span>
+      </div>
+      
+      {/* Voiceover */}
+      <div className="mb-3">
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-xs text-muted-foreground">Script</span>
+          <CopyButton
+            text={clip.voiceover}
+            field="voiceover"
+            copiedField={copiedField}
+            onCopy={handleCopy}
+          />
+        </div>
+        <p className="text-sm">&ldquo;{clip.voiceover}&rdquo;</p>
+      </div>
+
+      {/* Prompt */}
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-xs text-muted-foreground">Visual</span>
+          <CopyButton
+            text={clip.prompt}
+            field="prompt"
+            copiedField={copiedField}
+            onCopy={handleCopy}
+          />
+        </div>
+        <p className="text-xs text-muted-foreground line-clamp-2">{clip.prompt}</p>
       </div>
     </div>
   );
@@ -346,7 +279,6 @@ function CopyButton({
       ) : (
         <>
           <Copy className="size-3" />
-          <span>Copy</span>
         </>
       )}
     </button>

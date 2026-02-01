@@ -4,7 +4,18 @@ import FirecrawlApp from "@mendable/firecrawl-js";
 import OpenAI from "openai";
 import RunwayML from "@runwayml/sdk";
 import { ElevenLabsClient } from "elevenlabs";
+import Mux from "@mux/mux-node";
 import { z } from "zod";
+
+// Initialize Mux client
+function getMuxClient() {
+  const tokenId = process.env.MUX_ACCESS_TOKEN || process.env.MUX_TOKEN_ID;
+  const tokenSecret = process.env.MUX_SECRET_KEY || process.env.MUX_TOKEN_SECRET;
+  if (!tokenId || !tokenSecret) {
+    throw new Error("MUX_ACCESS_TOKEN/MUX_TOKEN_ID and MUX_SECRET_KEY/MUX_TOKEN_SECRET must be configured");
+  }
+  return new Mux({ tokenId, tokenSecret });
+}
 
 // Product info type for extraction
 export type ProductInfo = {
@@ -19,6 +30,7 @@ export type ProductInfo = {
   brand?: string;
   category?: string;
   imageUrl?: string;
+  imageUrls?: string[]; // Multiple product images
 };
 
 // Market research types
@@ -717,6 +729,8 @@ export async function scrapeProductUrl(
   try {
     const firecrawl = getFirecrawl();
 
+    console.log("Scraping product page with Firecrawl...");
+    
     // Scrape product info with structured extraction
     const result = await firecrawl.scrape(url, {
       formats: [
@@ -740,11 +754,18 @@ export async function scrapeProductUrl(
               brand: { type: "string", description: "Product brand name" },
               category: { type: "string", description: "Product category" },
               imageUrl: { type: "string", description: "Main product image URL (full URL starting with http)" },
+              imageUrls: {
+                type: "array",
+                items: { type: "string" },
+                description: "All product image URLs (full URLs starting with http, max 8 images)",
+              },
             },
           },
         },
       ],
     });
+    
+    console.log("Firecrawl scrape complete");
 
     if (!result || !result.json) {
       return { success: false, error: "Failed to scrape the page - no data returned" };
@@ -850,6 +871,7 @@ function getOpenAI() {
 }
 
 // Generate and validate video clips using GPT-4.1
+// Creates a cohesive 4-scene advertisement narrative: Hook → Problem → Solution → CTA
 async function generateClipsWithAI(
   productName: string,
   brandName: string | undefined,
@@ -861,7 +883,8 @@ async function generateClipsWithAI(
     const openai = getOpenAI();
 
     // Build branded product identifier for prompts
-    const brandedProduct = brandName 
+    // Avoid duplicating brand name if it's already in the product name
+    const brandedProduct = brandName && !productName.toLowerCase().includes(brandName.toLowerCase())
       ? `${brandName} ${productName}` 
       : productName;
 
@@ -870,40 +893,51 @@ async function generateClipsWithAI(
       messages: [
         {
           role: "system",
-          content: `You are a short-form video ad creator specializing in product B-roll footage. Generate video clips that showcase ONLY the product itself - no people, no hands, no faces.
+          content: `You are a premium short-form video ad creator. Generate EXACTLY 4 video scenes that flow together as a cohesive advertisement narrative.
+
+ADVERTISEMENT STRUCTURE (4 SCENES TOTAL):
+1. HOOK (Scene 1): Dramatic, attention-grabbing product reveal. Create intrigue and stop the scroll.
+2. PROBLEM (Scene 2): Subtly show the frustration or limitation the product solves. Build tension.
+3. SOLUTION (Scene 3): Showcase the product's key feature in action. The "aha" moment.
+4. CTA (Scene 4): Final glamour shot with brand prominence. Create desire and urgency.
 
 CRITICAL RULES:
-- Every prompt MUST be product-only B-roll footage
-- NO people, hands, faces, or human elements in any prompt
-- Focus on: product shots, close-ups, rotating views, product features, textures, materials
-- Use cinematic language: "macro shot", "rotating product", "studio lighting", "clean background", "floating product", "detail shot"
-- BRANDING: Include the product name "${brandedProduct}" or brand "${brandName || productName}" in prompts where appropriate (e.g., on packaging, logo visible on product, branded box, etc.)
-- When showing packaging or product labels, ensure the brand name is visible and readable
+- Generate EXACTLY 4 scenes that tell a complete story
+- Product-only B-roll footage - NO people, hands, or faces
+- Each scene must flow naturally into the next (visual and narrative continuity)
+- Use cinematic language: "macro shot", "dramatic lighting", "slow reveal", "floating product", "cinematic sweep"
+- The voiceover script must form one cohesive narrative when read in sequence
+- Keep each voiceover line punchy (8-12 words max) - they will be combined into one audio track
 
-Each clip needs:
-1. label: Short label like "Hero Shot", "Detail", "Feature", "Texture", "Rotating", "Close-up"
-2. prompt: B-roll direction (product-only visuals, NO people) - INCLUDE BRAND NAME/LOGO visibility where natural
-3. voiceover: The exact text to be spoken as audio (keep each under 15 words) - can mention the brand/product name
+PRODUCT: "${brandedProduct}"
+BRAND: "${brandName || productName}"
 
-Output valid JSON array of clips. Generate 4-6 clips that flow together as a cohesive product showcase.`
+Output valid JSON array with exactly 4 clips, each having: label, prompt, voiceover`
         },
         {
           role: "user",
-          content: `Product: ${productName}
-Brand: ${brandName || "N/A"}
-Full branded name: ${brandedProduct}
+          content: `Product: ${brandedProduct}
 
-Pain points this product solves:
-${painPoints.slice(0, 3).map(p => `- ${p}`).join("\n") || "- General frustration with alternatives"}
+PAIN POINTS TO ADDRESS:
+${painPoints.slice(0, 2).map(p => `- ${p}`).join("\n") || "- Frustration with inferior alternatives"}
 
-Key features to highlight:
-${features.slice(0, 3).map(f => `- ${f}`).join("\n") || "- Quality and reliability"}
+KEY FEATURES TO HIGHLIGHT:
+${features.slice(0, 2).map(f => `- ${f}`).join("\n") || "- Premium quality and performance"}
 
-Generate B-roll focused video clips. Remember: PRODUCT ONLY, no people or hands. Include brand name "${brandName || productName}" visible on product/packaging where natural. Return ONLY the JSON, no explanation:`
+Generate a 4-scene advertisement that tells a compelling story:
+- Scene 1 (Hook): Dramatic reveal that grabs attention
+- Scene 2 (Problem): Visual tension showing what life was like before  
+- Scene 3 (Solution): The product solving the problem beautifully
+- Scene 4 (CTA): Aspirational close with brand prominence
+
+The 4 voiceover lines MUST flow together as one script. Example flow:
+"What if silence was this beautiful?" → "No more compromises." → "Pure, immersive sound." → "${brandName || productName}. Hear everything."
+
+Return ONLY the JSON array with exactly 4 clips:`
         }
       ],
-      max_tokens: 800,
-      temperature: 0.8,
+      max_tokens: 1000,
+      temperature: 0.7,
     });
 
     const content = response.choices[0]?.message?.content?.trim() || "[]";
@@ -911,9 +945,12 @@ Generate B-roll focused video clips. Remember: PRODUCT ONLY, no people or hands.
     const jsonStr = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
     const clips = JSON.parse(jsonStr) as Array<{ label: string; prompt: string; voiceover: string }>;
 
-    return clips.map(clip => ({
+    // Ensure we have exactly 4 clips
+    const finalClips = clips.slice(0, 4);
+    
+    return finalClips.map((clip, index) => ({
       id: crypto.randomUUID(),
-      label: clip.label,
+      label: clip.label || ["Hook", "Problem", "Solution", "CTA"][index],
       prompt: clip.prompt,
       voiceover: clip.voiceover,
     }));
@@ -942,45 +979,47 @@ export async function generateStoryboards(
   console.log("Generating clips with GPT-4.1...");
   let clips = await generateClipsWithAI(productName, brandName, painPoints, competitors, features);
 
-  // Fallback if AI fails - product-only B-roll with branding
+  // Fallback if AI fails - 4-scene narrative structure
   if (clips.length === 0) {
     const shortName = product.brand || productName.split(" ")[0];
-    const brandedProduct = brandName ? `${brandName} ${productName}` : productName;
+    // Avoid duplicating brand name if it's already in the product name
+    const brandedProduct = brandName && !productName.toLowerCase().includes(brandName.toLowerCase())
+      ? `${brandName} ${productName}` 
+      : productName;
     const mainFeature = features[0] || "premium quality";
+    const painPoint = painPoints[0] || "settling for less";
 
+    // 4-scene narrative: Hook → Problem → Solution → CTA
     clips = [
       {
         id: crypto.randomUUID(),
-        label: "Hero Shot",
-        prompt: `${brandedProduct} product floating on clean white background, ${brandName || shortName} logo visible on packaging, soft studio lighting, rotating slowly, 4K cinematic`,
-        voiceover: `Introducing ${shortName}. Built different.`,
+        label: "Hook",
+        prompt: `Dramatic slow reveal of ${brandedProduct} emerging from darkness into spotlight, cinematic lighting, particles floating, mysterious atmosphere, premium product photography`,
+        voiceover: `What if everything changed?`,
       },
       {
         id: crypto.randomUUID(),
-        label: "Detail",
-        prompt: `Extreme macro close-up of ${brandedProduct} texture and materials, brand embossing visible, shallow depth of field, premium feel`,
-        voiceover: `Crafted with precision. Every detail matters.`,
+        label: "Problem",
+        prompt: `Split screen effect: dim, desaturated generic products on one side fading away, ${brandedProduct} glowing on the other side, visual contrast, tension building`,
+        voiceover: `No more ${painPoint.slice(0, 25).toLowerCase()}.`,
       },
       {
         id: crypto.randomUUID(),
-        label: "Feature",
-        prompt: `${brandedProduct} with ${brandName || shortName} branding visible, product shot highlighting key feature, dramatic lighting, clean background, slow motion`,
-        voiceover: `${mainFeature.slice(0, 30)}. This changes everything.`,
+        label: "Solution",
+        prompt: `${brandedProduct} in action, extreme macro detail shot highlighting ${mainFeature.slice(0, 30)}, golden hour lighting, shallow depth of field, premium feel`,
+        voiceover: `Experience ${mainFeature.slice(0, 20)}. Perfected.`,
       },
       {
         id: crypto.randomUUID(),
-        label: "Rotating",
-        prompt: `360 degree rotating shot of ${brandedProduct}, ${brandName || shortName} logo in view, studio lighting, seamless loop, product showcase`,
-        voiceover: `See it from every angle. Pure craftsmanship.`,
-      },
-      {
-        id: crypto.randomUUID(),
-        label: "Close-up",
-        prompt: `${brandedProduct} hero shot with ${brandName || shortName} packaging visible, dramatic shadows, minimal background, product photography style`,
-        voiceover: `${shortName}. Available now.`,
+        label: "CTA",
+        prompt: `${brandedProduct} hero shot with ${shortName} logo prominently visible, floating on gradient background, lens flare, aspirational mood, call to action energy`,
+        voiceover: `${shortName}. This is it.`,
       },
     ];
   }
+
+  // Ensure exactly 4 clips for the ad structure
+  clips = clips.slice(0, 4);
 
   console.log(`Generated ${clips.length} video clips`);
 
@@ -990,21 +1029,20 @@ export async function generateStoryboards(
   };
 }
 
-// Word timing for subtitles
-export type WordTiming = {
-  word: string;
-  start: number; // seconds
-  end: number;   // seconds
-};
-
 // Video + voiceover generation result type
 export type ClipGenerationResult =
-  | { success: true; videoUrl: string; audioUrl: string; wordTimings: WordTiming[] }
+  | { 
+      success: true; 
+      muxPlaybackId: string;  // Mux playback ID for the video player
+      muxAssetId: string;     // Mux asset ID for management
+      sceneCount: number;
+      audioDuration: number;  // Duration in seconds
+    }
   | { success: false; error: string };
 
-// Generate voiceover audio with word-level timestamps using ElevenLabs REST API
+// Generate voiceover audio using ElevenLabs REST API
 async function generateVoiceover(text: string): Promise<
-  | { success: true; audioUrl: string; wordTimings: WordTiming[] }
+  | { success: true; audioBase64: string; duration: number }
   | { success: false; error: string }
 > {
   const apiKey = (process.env.ELEVEN_API_KEY || process.env.ELEVENLABS_API_KEY)?.trim();
@@ -1014,22 +1052,25 @@ async function generateVoiceover(text: string): Promise<
   }
 
   try {
-    console.log("Generating voiceover with timestamps for:", text.slice(0, 50) + "...");
+    console.log("Generating voiceover for:", text.slice(0, 50) + "...");
 
-    // Use the with-timestamps endpoint for word-level timing
-    const voiceId = "21m00Tcm4TlvDq8ikWAM"; // Rachel - default voice
-    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/with-timestamps`, {
+    // Using "Charlotte" voice - confident, warm female voice perfect for ads
+    const voiceId = "XB0fDUnXU5powFXDhCwa"; // Charlotte - confident female voice
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
       method: "POST",
       headers: {
         "xi-api-key": apiKey,
         "Content-Type": "application/json",
+        "Accept": "audio/mpeg",
       },
       body: JSON.stringify({
         text,
-        model_id: "eleven_monolingual_v1",
+        model_id: "eleven_multilingual_v2", // Most realistic model
         voice_settings: {
-          stability: 0.5,
-          similarity_boost: 0.5,
+          stability: 0.6, // Balanced for natural variation
+          similarity_boost: 0.8, // High for authentic voice
+          style: 0.5, // Expressive for advertisement feel
+          use_speaker_boost: true, // Enhanced audio quality
         },
       }),
     });
@@ -1040,57 +1081,15 @@ async function generateVoiceover(text: string): Promise<
       return { success: false, error: `ElevenLabs API error: ${response.status} - ${errorText}` };
     }
 
-    const data = await response.json() as {
-      audio_base64: string;
-      alignment: {
-        characters: string[];
-        character_start_times_seconds: number[];
-        character_end_times_seconds: number[];
-      };
-    };
+    const audioBuffer = await response.arrayBuffer();
+    const audioBase64 = Buffer.from(audioBuffer).toString("base64");
 
-    const audioUrl = `data:audio/mpeg;base64,${data.audio_base64}`;
+    // Estimate duration based on text length (rough approximation: ~150 words per minute)
+    const wordCount = text.split(/\s+/).length;
+    const estimatedDuration = (wordCount / 150) * 60;
 
-    // Convert character-level timings to word-level timings
-    const wordTimings: WordTiming[] = [];
-    const { characters, character_start_times_seconds, character_end_times_seconds } = data.alignment;
-
-    let currentWord = "";
-    let wordStart = 0;
-    let wordEnd = 0;
-
-    for (let i = 0; i < characters.length; i++) {
-      const char = characters[i];
-      const charStart = character_start_times_seconds[i];
-      const charEnd = character_end_times_seconds[i];
-
-      if (char === " " || i === characters.length - 1) {
-        // End of word
-        if (i === characters.length - 1 && char !== " ") {
-          currentWord += char;
-          wordEnd = charEnd;
-        }
-
-        if (currentWord.trim()) {
-          wordTimings.push({
-            word: currentWord.trim(),
-            start: wordStart,
-            end: wordEnd,
-          });
-        }
-        currentWord = "";
-        wordStart = charEnd; // Next word starts after this space
-      } else {
-        if (currentWord === "") {
-          wordStart = charStart;
-        }
-        currentWord += char;
-        wordEnd = charEnd;
-      }
-    }
-
-    console.log(`Voiceover generation complete with ${wordTimings.length} words`);
-    return { success: true, audioUrl, wordTimings };
+    console.log(`Voiceover generation complete (~${estimatedDuration.toFixed(1)}s estimated)`);
+    return { success: true, audioBase64, duration: estimatedDuration };
   } catch (error) {
     console.error("Voiceover generation error:", error);
     return {
@@ -1100,50 +1099,290 @@ async function generateVoiceover(text: string): Promise<
   }
 }
 
-// Generate video from a clip prompt using RunwayML
-async function generateVideoOnly(promptText: string): Promise<{ success: true; videoUrl: string } | { success: false; error: string }> {
+// Generate a single short video scene (2 seconds) using RunwayML
+async function generateVideoScene(promptText: string, sceneIndex: number): Promise<{ success: true; videoUrl: string; sceneIndex: number } | { success: false; error: string; sceneIndex: number }> {
   if (!process.env.RUNWAYML_API_SECRET) {
-    return { success: false, error: "RUNWAYML_API_SECRET not configured" };
+    return { success: false, error: "RUNWAYML_API_SECRET not configured", sceneIndex };
   }
 
   try {
     const client = new RunwayML();
 
-    console.log("Starting video generation for:", promptText.slice(0, 50) + "...");
+    console.log(`Starting scene ${sceneIndex + 1} generation for:`, promptText.slice(0, 50) + "...");
 
     const task = await client.textToVideo
       .create({
         model: "veo3.1_fast",
         promptText,
         ratio: "1280:720",
-        duration: 4,
+        duration: 4, // 4 seconds per scene, 4 scenes = 16 seconds total (fast-paced ad cuts)
       })
       .waitForTaskOutput();
 
-    console.log("Video generation complete:", task);
+    console.log(`Scene ${sceneIndex + 1} generation complete`);
 
     if (task.output && Array.isArray(task.output) && task.output[0]) {
-      return { success: true, videoUrl: task.output[0] };
+      return { success: true, videoUrl: task.output[0], sceneIndex };
     }
 
-    return { success: false, error: "No video output returned" };
+    return { success: false, error: "No video output returned", sceneIndex };
   } catch (error) {
-    console.error("Video generation error:", error);
+    console.error(`Scene ${sceneIndex + 1} generation error:`, error);
     return {
       success: false,
       error: error instanceof Error ? error.message : "Failed to generate video",
+      sceneIndex,
     };
   }
 }
 
-// Generate both video and voiceover for a clip
+// Upload video to Mux and get playback ID
+async function uploadToMux(
+  videoFilePath: string
+): Promise<{ success: true; playbackId: string; assetId: string } | { success: false; error: string }> {
+  try {
+    const mux = getMuxClient();
+    
+    console.log("Uploading video to Mux...");
+    
+    // Read the video file
+    const { readFileSync } = await import("node:fs");
+    const videoBuffer = readFileSync(videoFilePath);
+    
+    // Create a direct upload URL
+    const upload = await mux.video.uploads.create({
+      cors_origin: "*",
+      new_asset_settings: {
+        playback_policies: ["public"],
+        encoding_tier: "baseline", // Fast encoding
+      },
+    });
+
+    // Upload the video to Mux
+    const uploadResponse = await fetch(upload.url, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "video/mp4",
+      },
+      body: videoBuffer,
+    });
+
+    if (!uploadResponse.ok) {
+      throw new Error(`Upload failed: ${uploadResponse.status}`);
+    }
+
+    console.log("Video uploaded, waiting for Mux to process...");
+
+    // Poll for the asset to be ready
+    let asset = null;
+    let attempts = 0;
+    const maxAttempts = 60; // 5 minutes max wait
+
+    while (attempts < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
+      
+      const uploadStatus = await mux.video.uploads.retrieve(upload.id);
+      
+      if (uploadStatus.asset_id) {
+        asset = await mux.video.assets.retrieve(uploadStatus.asset_id);
+        
+        if (asset.status === "ready") {
+          console.log("Mux asset ready!");
+          break;
+        } else if (asset.status === "errored") {
+          throw new Error("Mux asset processing failed");
+        }
+      }
+      
+      attempts++;
+      console.log(`Waiting for Mux processing... (attempt ${attempts}/${maxAttempts})`);
+    }
+
+    if (!asset || asset.status !== "ready") {
+      throw new Error("Timed out waiting for Mux to process video");
+    }
+
+    const playbackId = asset.playback_ids?.[0]?.id;
+    if (!playbackId) {
+      throw new Error("No playback ID returned from Mux");
+    }
+
+    console.log("Mux upload complete. Playback ID:", playbackId);
+    return { success: true, playbackId, assetId: asset.id };
+  } catch (error) {
+    console.error("Mux upload error:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to upload to Mux",
+    };
+  }
+}
+
+// Combine multiple video scenes with audio using ffmpeg
+async function combineVideosWithAudio(
+  videoUrls: string[],
+  audioBase64: string
+): Promise<{ success: true; outputFilePath: string; tempDir: string } | { success: false; error: string }> {
+  const { execSync } = await import("node:child_process");
+  const { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+
+  let tempDir: string | null = null;
+
+  try {
+    // Create temp directory
+    tempDir = mkdtempSync(join(tmpdir(), "video-combine-"));
+    console.log("Created temp directory:", tempDir);
+
+    // Download all videos in parallel
+    console.log("Downloading", videoUrls.length, "video scenes...");
+    const videoPromises = videoUrls.map(async (url, i) => {
+      const response = await fetch(url);
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const filePath = join(tempDir!, `scene_${i}.mp4`);
+      writeFileSync(filePath, buffer);
+      return filePath;
+    });
+
+    const videoFiles = await Promise.all(videoPromises);
+    console.log("Downloaded all video scenes");
+
+    // Write audio file
+    const audioBuffer = Buffer.from(audioBase64, "base64");
+    const audioFile = join(tempDir, "audio.mp3");
+    writeFileSync(audioFile, audioBuffer);
+
+    // Create ffmpeg concat file
+    const concatFile = join(tempDir, "concat.txt");
+    const concatContent = videoFiles.map(f => `file '${f}'`).join("\n");
+    writeFileSync(concatFile, concatContent);
+
+    // Concatenate videos (re-encode to ensure consistent codec)
+    const concatenatedVideo = join(tempDir, "concatenated.mp4");
+    execSync(`ffmpeg -f concat -safe 0 -i "${concatFile}" -c:v libx264 -preset fast -crf 23 -an "${concatenatedVideo}"`, {
+      stdio: "pipe",
+    });
+    console.log("Concatenated videos");
+
+    // Combine video with audio - ensure audio is properly encoded
+    const outputFile = join(tempDir, "final.mp4");
+    execSync(
+      `ffmpeg -i "${concatenatedVideo}" -i "${audioFile}" -c:v copy -c:a aac -b:a 192k -map 0:v:0 -map 1:a:0 -shortest "${outputFile}"`,
+      { stdio: "pipe" }
+    );
+    console.log("Combined video with audio");
+
+    // Return the file path and temp dir (caller will clean up after Mux upload)
+    return { success: true, outputFilePath: outputFile, tempDir };
+  } catch (error) {
+    console.error("Video combination error:", error);
+    // Cleanup on error
+    if (tempDir && existsSync(tempDir)) {
+      try {
+        rmSync(tempDir, { recursive: true, force: true });
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to combine videos",
+    };
+  }
+}
+
+// Cleanup helper for temp directories
+async function cleanupTempDir(tempDir: string) {
+  const { rmSync, existsSync } = await import("node:fs");
+  if (existsSync(tempDir)) {
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+      console.log("Cleaned up temp directory");
+    } catch {
+      console.warn("Failed to cleanup temp directory");
+    }
+  }
+}
+
+// Generate a complete advertisement with multiple cuts
+// Takes all clips, generates 4 scene videos in parallel, combines with voiceover, uploads to Mux
 export async function generateClipMedia(
   videoPrompt: string,
-  voiceoverText: string
+  voiceoverText: string,
+  allClips?: VideoClip[]
 ): Promise<ClipGenerationResult> {
-  // Run both in parallel
+  // If we have all clips, generate a multi-scene ad
+  if (allClips && allClips.length >= 4) {
+    console.log("Generating multi-scene advertisement with", allClips.length, "clips");
+    
+    // Take first 4 clips for the scenes (Hook → Problem → Solution → CTA)
+    const scenesToGenerate = allClips.slice(0, 4);
+    
+    // Combine all voiceovers into one cohesive script
+    const combinedVoiceover = scenesToGenerate.map(c => c.voiceover).join(" ");
+    
+    // Generate all 4 video scenes in parallel + voiceover
+    console.log("Generating 4 scenes in parallel + voiceover...");
+    const [scene1, scene2, scene3, scene4, audioResult] = await Promise.all([
+      generateVideoScene(scenesToGenerate[0].prompt, 0),
+      generateVideoScene(scenesToGenerate[1].prompt, 1),
+      generateVideoScene(scenesToGenerate[2].prompt, 2),
+      generateVideoScene(scenesToGenerate[3].prompt, 3),
+      generateVoiceover(combinedVoiceover),
+    ]);
+
+    // Check for failures
+    const sceneResults = [scene1, scene2, scene3, scene4];
+    const failedScenes = sceneResults.filter(s => !s.success);
+    
+    if (failedScenes.length > 0) {
+      const errors = failedScenes.map(s => `Scene ${s.sceneIndex + 1}: ${(s as { error: string }).error}`);
+      return { success: false, error: `Video generation failed: ${errors.join(", ")}` };
+    }
+
+    if (!audioResult.success) {
+      return { success: false, error: `Audio: ${audioResult.error}` };
+    }
+
+    // Get all successful video URLs in order
+    const videoUrls = sceneResults
+      .filter((s): s is { success: true; videoUrl: string; sceneIndex: number } => s.success)
+      .sort((a, b) => a.sceneIndex - b.sceneIndex)
+      .map(s => s.videoUrl);
+
+    // Combine videos with audio using ffmpeg
+    console.log("Combining", videoUrls.length, "scenes with audio...");
+    const combineResult = await combineVideosWithAudio(videoUrls, audioResult.audioBase64);
+
+    if (!combineResult.success) {
+      return { success: false, error: `Combine: ${combineResult.error}` };
+    }
+
+    // Upload to Mux for professional video hosting
+    console.log("Uploading combined video to Mux...");
+    const muxResult = await uploadToMux(combineResult.outputFilePath);
+    
+    // Cleanup temp files after upload
+    await cleanupTempDir(combineResult.tempDir);
+
+    if (!muxResult.success) {
+      return { success: false, error: `Mux upload: ${muxResult.error}` };
+    }
+
+    return {
+      success: true,
+      muxPlaybackId: muxResult.playbackId,
+      muxAssetId: muxResult.assetId,
+      sceneCount: 4,
+      audioDuration: audioResult.duration,
+    };
+  }
+
+  // Single clip mode (fallback) - still upload to Mux
+  console.log("Generating single video clip");
   const [videoResult, audioResult] = await Promise.all([
-    generateVideoOnly(videoPrompt),
+    generateVideoScene(videoPrompt, 0),
     generateVoiceover(voiceoverText),
   ]);
 
@@ -1155,11 +1394,27 @@ export async function generateClipMedia(
     return { success: false, error: `Audio: ${audioResult.error}` };
   }
 
+  // Combine single video with audio
+  const combineResult = await combineVideosWithAudio([videoResult.videoUrl], audioResult.audioBase64);
+  
+  if (!combineResult.success) {
+    return { success: false, error: `Combine: ${combineResult.error}` };
+  }
+
+  // Upload to Mux
+  const muxResult = await uploadToMux(combineResult.outputFilePath);
+  await cleanupTempDir(combineResult.tempDir);
+
+  if (!muxResult.success) {
+    return { success: false, error: `Mux upload: ${muxResult.error}` };
+  }
+
   return {
     success: true,
-    videoUrl: videoResult.videoUrl,
-    audioUrl: audioResult.audioUrl,
-    wordTimings: audioResult.wordTimings,
+    muxPlaybackId: muxResult.playbackId,
+    muxAssetId: muxResult.assetId,
+    sceneCount: 1,
+    audioDuration: audioResult.duration,
   };
 }
 

@@ -1,6 +1,7 @@
 "use client";
 
-import { Star } from "lucide-react";
+import { useState } from "react";
+import { Star, ChevronLeft, ChevronRight } from "lucide-react";
 import type { ProductInfo } from "@/app/_actions";
 
 interface ProductDetailsProps {
@@ -9,21 +10,81 @@ interface ProductDetailsProps {
 }
 
 export function ProductDetails({ product, sourceUrl }: ProductDetailsProps) {
-  const hasImage = product.imageUrl?.startsWith("http");
+  // Combine imageUrl and imageUrls, filter valid URLs
+  const allImages = [
+    product.imageUrl,
+    ...(product.imageUrls || []),
+  ].filter((url): url is string => !!url && url.startsWith("http"));
+  
+  // Remove duplicates
+  const uniqueImages = [...new Set(allImages)];
+  
+  const [selectedImage, setSelectedImage] = useState(0);
 
   return (
     <div className="space-y-4">
       <SectionHeader>Product</SectionHeader>
       
       <div className="space-y-4">
-        {/* Product Image */}
-        {hasImage && (
-          <div className="w-32 h-32 rounded border bg-muted/30 overflow-hidden">
-            <img
-              src={product.imageUrl}
-              alt={product.title || "Product"}
-              className="w-full h-full object-contain"
-            />
+        {/* Image Gallery */}
+        {uniqueImages.length > 0 && (
+          <div className="space-y-3">
+            {/* Main Image */}
+            <div className="relative w-full aspect-square max-w-xs rounded-lg border bg-muted/30 overflow-hidden">
+              <img
+                src={uniqueImages[selectedImage]}
+                alt={product.title || "Product"}
+                className="w-full h-full object-contain"
+              />
+              
+              {/* Navigation Arrows */}
+              {uniqueImages.length > 1 && (
+                <>
+                  <button
+                    onClick={() => setSelectedImage((prev) => (prev === 0 ? uniqueImages.length - 1 : prev - 1))}
+                    className="absolute left-2 top-1/2 -translate-y-1/2 size-8 rounded-full bg-background/80 border flex items-center justify-center hover:bg-background transition-colors"
+                  >
+                    <ChevronLeft className="size-4" />
+                  </button>
+                  <button
+                    onClick={() => setSelectedImage((prev) => (prev === uniqueImages.length - 1 ? 0 : prev + 1))}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 size-8 rounded-full bg-background/80 border flex items-center justify-center hover:bg-background transition-colors"
+                  >
+                    <ChevronRight className="size-4" />
+                  </button>
+                </>
+              )}
+              
+              {/* Image Counter */}
+              {uniqueImages.length > 1 && (
+                <div className="absolute bottom-2 right-2 px-2 py-1 rounded bg-background/80 text-xs">
+                  {selectedImage + 1} / {uniqueImages.length}
+                </div>
+              )}
+            </div>
+            
+            {/* Thumbnails */}
+            {uniqueImages.length > 1 && (
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {uniqueImages.slice(0, 8).map((url, index) => (
+                  <button
+                    key={index}
+                    onClick={() => setSelectedImage(index)}
+                    className={`shrink-0 size-14 rounded border overflow-hidden transition-all ${
+                      selectedImage === index
+                        ? "ring-2 ring-foreground ring-offset-2"
+                        : "opacity-60 hover:opacity-100"
+                    }`}
+                  >
+                    <img
+                      src={url}
+                      alt={`Product image ${index + 1}`}
+                      className="w-full h-full object-contain bg-muted/30"
+                    />
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -103,7 +164,7 @@ function Rating({ value, count }: { value: number; count?: string }) {
 function FeatureList({ features }: { features: string[] }) {
   return (
     <ul className="space-y-1.5">
-      {features.slice(0, 4).map((feature, i) => (
+      {features.slice(0, 5).map((feature, i) => (
         <li key={i} className="text-sm text-muted-foreground flex items-start gap-2">
           <span className="text-muted-foreground/50 mt-1.5">•</span>
           <span>{feature}</span>
